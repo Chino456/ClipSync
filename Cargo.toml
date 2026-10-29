@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/clipsync-core", "crates/clipsync-cli"]
+members = ["crates/clipsync-core", "crates/clipsync-cli", "crates/clipsync-gui"]
 resolver = "2"
 
 [workspace.package]
@@ -14,4 +14,3 @@ serde_json = "1.0.151"
 socket2 = { version = "0.6.5", features = ["all"] }
 thiserror = "2.0.21"
 uuid = { version = "1.27.0", features = ["v4", "serde"] }
-

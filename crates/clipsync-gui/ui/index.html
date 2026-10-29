@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClipSync</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="main.js" defer></script>
+  </head>
+  <body>
+    <main class="connection-panel" aria-labelledby="local-ip-label">
+      <div class="local-address">
+        <span id="local-ip-label">本机 IP</span>
+        <strong id="local-ip" aria-live="polite">正在获取…</strong>
+      </div>
+      <button id="connect-button" type="button">开始连接</button>
+    </main>
+
+    <div id="connect-dialog" class="dialog-backdrop" hidden>
+      <form id="connect-form" class="dialog" aria-labelledby="dialog-title">
+        <h2 id="dialog-title">连接另一台设备</h2>
+        <label for="peer-ip">输入对方界面显示的 IP 地址</label>
+        <input
+          id="peer-ip"
+          name="peer-ip"
+          type="text"
+          inputmode="decimal"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="例如：10.29.182.191"
+          required
+        />
+        <p id="dialog-error" class="dialog-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="cancel-button" class="secondary-button" type="button">取消</button>
+          <button class="primary-button" type="submit">连接</button>
+        </div>
+      </form>
+    </div>
+  </body>
+</html>

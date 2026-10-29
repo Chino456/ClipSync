@@ -59,7 +59,7 @@ cargo build --release
 - Linux：`target/release/clipsync` 和 `target/release/clipsync-gui`
 - Windows：`target\release\clipsync.exe` 和 `target\release\clipsync-gui.exe`
 
-GUI 会在后台调用同目录中的 `clipsync`，因此分发时需要把这两个文件放在一起。
+当前 Tauri 界面与 CLI 传输程序是两个独立构建产物；下一阶段再接入现有同步逻辑。
 
 ## 局域网设备发现
 
@@ -129,9 +129,19 @@ Transport peer: Linux laptop [linux]
 双向的，不需要再建立反向连接。程序启动前已经存在的剪贴板内容不会自动发送，
 只有启动后的变化会同步。
 
-## 匹配码 GUI
+## Tauri 2 GUI
 
-GUI 不需要任何启动参数，设备名会从系统主机名自动获取：
+GUI 已使用 Tauri 2 重构，不需要任何启动参数。窗口中央显示本机 IPv4，其下方
+是“开始连接”按钮；设备名从 Windows 的 `COMPUTERNAME` 或 Linux 的 `HOSTNAME`
+自动获取并用于连接握手。
+
+构建 GUI：
+
+```bash
+cargo build --release -p clipsync-cli -p clipsync-gui
+```
+
+运行：
 
 ```bash
 # Linux
@@ -143,15 +153,18 @@ target/release/clipsync-gui
 target\release\clipsync-gui.exe
 ```
 
-启动后程序会自动监听，并在按钮上显示本机 8 位匹配码。另一台设备点击按钮、
-输入这个匹配码并选择“连接”即可。建立协议连接后，按钮显示“已连接：设备名”；
-再次点击会停止连接。匹配码不区分大小写，其中的连字符可以省略。
+两台设备启动后都会自动监听。点击“开始连接”，输入另一台设备界面上显示的 IP
+地址并确认即可连接。成功后按钮会显示对端自动获取的系统主机名。GUI 会调用
+同目录中的 `clipsync` 传输程序，因此分发时需要把两个可执行文件放在一起。
+匹配码机制已经完全移除。
 
-当前匹配码是无服务器局域网方案：它编码了本机 IPv4 地址并带有输入错误校验，
-因此能绕过校园网对组播发现的限制，但不能绕过完全禁止客户端互访的 AP 隔离。
-它目前只替代手动输入 IP，并不提供身份认证；安全配对和加密仍属于后续阶段。
+Ubuntu/Debian 构建 Tauri GUI 前需要安装 WebKitGTK 开发依赖：
 
-Linux 使用系统 GTK 3，Windows 使用原生 Win32 窗口，不需要额外安装 GUI 框架。
+```bash
+sudo apt install libwebkit2gtk-4.1-dev
+```
+
+Windows 使用系统 WebView2；Windows 10 1803 及之后的版本通常已经预装。
 
 Linux 监听策略：
 

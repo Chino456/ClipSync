@@ -86,11 +86,20 @@ Both directions are active after the connection is established. Copy text on
 either device, then paste normally with `Ctrl+V` on the other device. TCP port
 `24872` must be allowed by the listening device's firewall.
 
-### Single-button GUI
+### Tauri 2 GUI
 
-`cargo build --release` also builds `clipsync-gui` (`clipsync-gui.exe` on
-Windows). Keep it beside the `clipsync` executable because it starts the CLI
-transport in the background. No command-line arguments are required:
+The GUI has been rebuilt with Tauri 2 and requires no command-line arguments.
+It displays the local IPv4 address above one centered **Start connection**
+button. The system hostname is obtained automatically and used as the device
+name during the connection handshake.
+
+Build it with:
+
+```bash
+cargo build --release -p clipsync-cli -p clipsync-gui
+```
+
+Run it with:
 
 ```bash
 target/release/clipsync-gui
@@ -100,13 +109,12 @@ target/release/clipsync-gui
 target\release\clipsync-gui.exe
 ```
 
-Each device displays an eight-character pairing code and starts listening. On
-the other device, click the button and enter that code to connect. The code
-encodes the device's LAN IPv4 address with a typo-detection checksum, so it
-replaces manual IP entry without requiring a rendezvous server. It bypasses
-blocked multicast discovery but cannot bypass full AP/client isolation, and it
-does not yet authenticate the peer. Linux uses the system GTK 3 runtime;
-Windows uses a native Win32 window.
+Both devices start listening when the GUI opens. Click the button, enter the IP
+shown by the other device, and confirm to connect. After the handshake, the
+button shows the peer's automatically detected hostname. Keep `clipsync` beside
+`clipsync-gui`, as the GUI starts the existing transport executable in the
+background. The pairing-code experiment has been removed. Building on
+Ubuntu/Debian requires `libwebkit2gtk-4.1-dev`; Windows uses WebView2.
 
 Linux Wayland requires `wl-clipboard`. Linux X11 requires `xclip` or `xsel`.
 Windows uses the native Unicode clipboard API and has no extra dependency.
