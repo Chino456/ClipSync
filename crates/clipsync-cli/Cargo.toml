@@ -9,10 +9,15 @@ rust-version.workspace = true
 name = "clipsync"
 path = "src/main.rs"
 
+[[bin]]
+name = "clipsync-gui"
+path = "src/gui_main.rs"
+
 [dependencies]
 clipsync-core = { path = "../clipsync-core" }
 socket2.workspace = true
 uuid.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libloading = "0.8.9"
 zbus = "5.19.0"

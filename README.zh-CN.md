@@ -56,8 +56,10 @@ cargo build --release
 
 生成的程序位于：
 
-- Linux：`target/release/clipsync`
-- Windows：`target\release\clipsync.exe`
+- Linux：`target/release/clipsync` 和 `target/release/clipsync-gui`
+- Windows：`target\release\clipsync.exe` 和 `target\release\clipsync-gui.exe`
+
+GUI 会在后台调用同目录中的 `clipsync`，因此分发时需要把这两个文件放在一起。
 
 ## 局域网设备发现
 
@@ -126,6 +128,27 @@ Transport peer: Linux laptop [linux]
 连接建立后，在任意一端复制文本，另一端即可直接使用 `Ctrl+V` 粘贴。同步是
 双向的，不需要再建立反向连接。程序启动前已经存在的剪贴板内容不会自动发送，
 只有启动后的变化会同步。
+
+## 单按钮 GUI
+
+GUI 保留了 `sync` 命令的参数，但窗口中只有一个按钮。第一次点击“开始连接”会
+启动同步，再次点击“停止连接”会结束同步及其剪贴板监听进程；关闭窗口也会自动
+停止。
+
+例如，让 Linux 作为监听端：
+
+```bash
+target/release/clipsync-gui "Linux laptop"
+```
+
+让 Windows 通过 Linux 的 IP 主动连接：
+
+```powershell
+target\release\clipsync-gui.exe "Windows desktop" --peer 10.20.30.41
+```
+
+也可以把 `--port`、带端口的 `--peer` 等原有参数原样传给 GUI。Linux 使用系统
+GTK 3，Windows 使用原生 Win32 窗口，不需要额外安装 GUI 框架。
 
 Linux 监听策略：
 

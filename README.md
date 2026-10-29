@@ -86,6 +86,29 @@ Both directions are active after the connection is established. Copy text on
 either device, then paste normally with `Ctrl+V` on the other device. TCP port
 `24872` must be allowed by the listening device's firewall.
 
+### Single-button GUI
+
+`cargo build --release` now also builds `clipsync-gui` (`clipsync-gui.exe` on
+Windows). Keep it beside the `clipsync` executable because it starts the CLI
+transport in the background.
+
+Start a listening Linux device with:
+
+```bash
+target/release/clipsync-gui "Linux laptop"
+```
+
+Connect from Windows by IP with:
+
+```powershell
+target\release\clipsync-gui.exe "Windows desktop" --peer 10.20.30.41
+```
+
+The window has one button: click it once to start synchronization and again to
+stop it. Closing the window also stops the transport and clipboard watcher.
+All existing `sync` arguments, including `--port`, can be passed to the GUI.
+Linux uses the system GTK 3 runtime; Windows uses a native Win32 window.
+
 Linux Wayland requires `wl-clipboard`. Linux X11 requires `xclip` or `xsel`.
 Windows uses the native Unicode clipboard API and has no extra dependency.
 
