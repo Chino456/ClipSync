@@ -16,6 +16,8 @@ use clipsync_core::{MAX_CLIPBOARD_TEXT_BYTES, SyncMessage};
 use uuid::Uuid;
 
 use crate::clipboard;
+#[cfg(target_os = "linux")]
+use crate::gnome_extension;
 
 const DEFAULT_SYNC_PORT: u16 = 24_872;
 const MAX_FRAME_BYTES: usize = MAX_CLIPBOARD_TEXT_BYTES + 4_096;
@@ -34,12 +36,20 @@ pub fn run(args: impl IntoIterator<Item = String>) -> Result<(), Box<dyn std::er
     let hello = SyncMessage::hello(Uuid::new_v4(), &config.device_name, env::consts::OS)?;
     let (outgoing_sender, outgoing_receiver) = mpsc::sync_channel(1);
     let (incoming_sender, incoming_receiver) = mpsc::sync_channel(1);
+    let (local_sender, local_receiver) = mpsc::sync_channel(4);
     let remote_write = Arc::new(Mutex::new(None));
 
-    let watcher_remote_write = Arc::clone(&remote_write);
+    #[cfg(target_os = "linux")]
+    let _gnome_bridge = start_linux_clipboard_monitor(local_sender)?;
+    #[cfg(target_os = "windows")]
     thread::Builder::new()
         .name("clipsync-clipboard-watch".to_owned())
-        .spawn(move || clipboard_watch_loop(outgoing_sender, watcher_remote_write))?;
+        .spawn(move || clipboard_watch_loop(local_sender))?;
+
+    let event_remote_write = Arc::clone(&remote_write);
+    thread::Builder::new()
+        .name("clipsync-clipboard-events".to_owned())
+        .spawn(move || clipboard_event_loop(local_receiver, outgoing_sender, event_remote_write))?;
     thread::Builder::new()
         .name("clipsync-clipboard-write".to_owned())
         .spawn(move || clipboard_write_loop(incoming_receiver, remote_write))?;
@@ -59,10 +69,7 @@ pub fn run(args: impl IntoIterator<Item = String>) -> Result<(), Box<dyn std::er
     }
 }
 
-fn clipboard_watch_loop(
-    outgoing: SyncSender<SyncMessage>,
-    remote_write: Arc<Mutex<Option<String>>>,
-) {
+fn clipboard_watch_loop(local_updates: SyncSender<String>) {
     let mut last_observed = match clipboard::read_text() {
         Ok(text) => text,
         Err(error) => {
@@ -75,26 +82,111 @@ fn clipboard_watch_loop(
         match clipboard::read_text() {
             Ok(Some(text)) if last_observed.as_ref() != Some(&text) => {
                 last_observed = Some(text.clone());
-                let suppress = remote_write.lock().unwrap().take();
-                if suppress.as_ref() == Some(&text) {
-                    thread::sleep(CLIPBOARD_POLL_INTERVAL);
-                    continue;
-                }
-                match SyncMessage::clipboard_text(text) {
-                    Ok(message) => match outgoing.try_send(message) {
-                        Ok(()) => println!("-> Local clipboard changed"),
-                        Err(mpsc::TrySendError::Full(_)) => {
-                            eprintln!("! Connection is busy; clipboard change dropped")
-                        }
-                        Err(mpsc::TrySendError::Disconnected(_)) => return,
-                    },
-                    Err(error) => eprintln!("! Clipboard change was not sent: {error}"),
+                match local_updates.try_send(text) {
+                    Ok(()) => {}
+                    Err(mpsc::TrySendError::Full(_)) => {
+                        eprintln!("! Clipboard event queue is busy; update dropped")
+                    }
+                    Err(mpsc::TrySendError::Disconnected(_)) => return,
                 }
             }
             Ok(text) => last_observed = text,
             Err(error) => eprintln!("! Could not read clipboard: {error}"),
         }
         thread::sleep(CLIPBOARD_POLL_INTERVAL);
+    }
+}
+
+fn clipboard_event_loop(
+    local_updates: Receiver<String>,
+    outgoing: SyncSender<SyncMessage>,
+    remote_write: Arc<Mutex<Option<String>>>,
+) {
+    while let Ok(text) = local_updates.recv() {
+        let suppress = remote_write.lock().unwrap().take();
+        if suppress.as_ref() == Some(&text) {
+            continue;
+        }
+        match SyncMessage::clipboard_text(text) {
+            Ok(message) => match outgoing.try_send(message) {
+                Ok(()) => println!("-> Local clipboard changed"),
+                Err(mpsc::TrySendError::Full(_)) => {
+                    eprintln!("! Connection is busy; clipboard change dropped")
+                }
+                Err(mpsc::TrySendError::Disconnected(_)) => return,
+            },
+            Err(error) => eprintln!("! Clipboard change was not sent: {error}"),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn start_linux_clipboard_monitor(
+    local_updates: SyncSender<String>,
+) -> Result<Option<zbus::blocking::Connection>, Box<dyn std::error::Error>> {
+    if is_gnome_wayland() {
+        if !gnome_extension::is_enabled() {
+            return Err(
+                "GNOME Wayland requires the ClipSync Shell extension. Run `clipsync setup-gnome`, log out and back in, then run `gnome-extensions enable clipsync@local`."
+                    .into(),
+            );
+        }
+        let bridge = ClipboardBridge { local_updates };
+        let connection = zbus::blocking::connection::Builder::session()?
+            .name("org.clipsync.Daemon")?
+            .serve_at("/org/clipsync/Daemon", bridge)?
+            .build()?;
+        println!("Clipboard monitor: GNOME Shell event bridge (no polling)");
+        Ok(Some(connection))
+    } else if env::var_os("WAYLAND_DISPLAY").is_some() {
+        thread::Builder::new()
+            .name("clipsync-wayland-watch".to_owned())
+            .spawn(move || {
+                if let Err(error) = clipboard::watch_wayland_text(local_updates) {
+                    eprintln!("Wayland clipboard monitor stopped: {error}");
+                }
+            })?;
+        println!("Clipboard monitor: persistent Wayland event watcher");
+        Ok(None)
+    } else {
+        thread::Builder::new()
+            .name("clipsync-clipboard-watch".to_owned())
+            .spawn(move || clipboard_watch_loop(local_updates))?;
+        println!("Clipboard monitor: platform polling fallback");
+        Ok(None)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn is_gnome_wayland() -> bool {
+    if env::var_os("WAYLAND_DISPLAY").is_none() {
+        return false;
+    }
+    env::var("XDG_CURRENT_DESKTOP")
+        .unwrap_or_default()
+        .split(':')
+        .any(|desktop| desktop.eq_ignore_ascii_case("gnome"))
+}
+
+#[cfg(target_os = "linux")]
+struct ClipboardBridge {
+    local_updates: SyncSender<String>,
+}
+
+#[cfg(target_os = "linux")]
+#[zbus::interface(name = "org.clipsync.Daemon")]
+impl ClipboardBridge {
+    fn clipboard_text(&self, text: String) {
+        if text.is_empty() || text.len() > MAX_CLIPBOARD_TEXT_BYTES {
+            return;
+        }
+        match self.local_updates.try_send(text) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(_)) => {
+                eprintln!("! GNOME clipboard event queue is busy; update dropped")
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {}
+        }
     }
 }
 
@@ -319,5 +411,41 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(config.peer, Some("10.0.0.8:24872".parse().unwrap()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires access to the desktop session D-Bus"]
+    fn gnome_dbus_bridge_delivers_clipboard_text() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let service = format!("org.clipsync.Test{}", std::process::id());
+        let _server = zbus::blocking::connection::Builder::session()
+            .unwrap()
+            .name(service.as_str())
+            .unwrap()
+            .serve_at(
+                "/org/clipsync/Daemon",
+                ClipboardBridge {
+                    local_updates: sender,
+                },
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+        let client = zbus::blocking::Connection::session().unwrap();
+        let proxy = zbus::blocking::Proxy::new(
+            &client,
+            service.as_str(),
+            "/org/clipsync/Daemon",
+            "org.clipsync.Daemon",
+        )
+        .unwrap();
+        let _: () = proxy
+            .call("ClipboardText", &("event-driven text",))
+            .unwrap();
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "event-driven text"
+        );
     }
 }

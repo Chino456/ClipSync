@@ -3,9 +3,13 @@ use std::io;
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
+    use clipsync_core::MAX_CLIPBOARD_TEXT_BYTES;
     use std::{
-        io::Write,
+        io::{Read, Write},
         process::{Command, Stdio},
+        sync::mpsc::{SyncSender, TrySendError},
+        thread,
+        time::Duration,
     };
 
     pub fn read_text() -> io::Result<Option<String>> {
@@ -79,10 +83,83 @@ mod linux {
             .status()
             .is_ok()
     }
+
+    pub fn watch_wayland_text(local_updates: SyncSender<String>) -> io::Result<()> {
+        let executable = std::env::current_exe()?;
+        let mut last_observed = read_text()?;
+
+        loop {
+            let mut child = Command::new("wl-paste")
+                .args(["--type", "text", "--watch"])
+                .arg(&executable)
+                .arg("__clipboard-frame")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("cannot start wl-paste --watch: {error}"),
+                    )
+                })?;
+            let mut output = child
+                .stdout
+                .take()
+                .ok_or_else(|| io::Error::other("wl-paste watcher has no stdout"))?;
+
+            loop {
+                let mut length = [0_u8; 4];
+                if output.read_exact(&mut length).is_err() {
+                    break;
+                }
+                let length = u32::from_be_bytes(length) as usize;
+                if length > MAX_CLIPBOARD_TEXT_BYTES {
+                    break;
+                }
+                let mut bytes = vec![0_u8; length];
+                output.read_exact(&mut bytes)?;
+                let text = String::from_utf8(bytes)
+                    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+                if last_observed.as_ref() == Some(&text) {
+                    continue;
+                }
+                last_observed = Some(text.clone());
+                match local_updates.try_send(text) {
+                    Ok(()) => {}
+                    Err(TrySendError::Full(_)) => {
+                        eprintln!("! Clipboard event queue is busy; update dropped")
+                    }
+                    Err(TrySendError::Disconnected(_)) => return Ok(()),
+                }
+            }
+
+            let _ = child.kill();
+            let _ = child.wait();
+            eprintln!("! Wayland clipboard watcher exited; restarting in 2 seconds");
+            thread::sleep(Duration::from_secs(2));
+        }
+    }
+
+    pub fn run_frame_helper() -> Result<(), Box<dyn std::error::Error>> {
+        let mut bytes = Vec::new();
+        io::stdin()
+            .take((MAX_CLIPBOARD_TEXT_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > MAX_CLIPBOARD_TEXT_BYTES || std::str::from_utf8(&bytes).is_err() {
+            return Ok(());
+        }
+        let length = u32::try_from(bytes.len())?;
+        let mut stdout = io::stdout().lock();
+        stdout.write_all(&length.to_be_bytes())?;
+        stdout.write_all(&bytes)?;
+        stdout.flush()?;
+        Ok(())
+    }
 }
 
 #[cfg(target_os = "linux")]
-pub use linux::{read_text, write_text};
+pub use linux::{read_text, run_frame_helper, watch_wayland_text, write_text};
 
 #[cfg(target_os = "windows")]
 mod windows_native {

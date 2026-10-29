@@ -26,6 +26,22 @@ Windows 和 Linux 设备之间同步剪贴板。
 - Linux X11：安装 `xclip` 或 `xsel`。
 - Windows 无额外剪贴板依赖。
 
+GNOME Wayland 还需要 ClipSync 自带的 Shell 扩展。首次安装：
+
+```bash
+cargo run --release -- setup-gnome
+```
+
+安装后注销并重新登录一次，然后启用扩展：
+
+```bash
+gnome-extensions enable clipsync@local
+```
+
+这是 GNOME 的平台限制：GNOME 不向普通后台程序提供全局剪贴板变化事件，必须由
+Shell 扩展监听。扩展只在 ClipSync 运行时把纯文本交给本机会话 D-Bus 服务，
+不会建立网络连接。
+
 Ubuntu/Debian Wayland 可以运行：
 
 ```bash
@@ -111,6 +127,15 @@ Transport peer: Linux laptop [linux]
 双向的，不需要再建立反向连接。程序启动前已经存在的剪贴板内容不会自动发送，
 只有启动后的变化会同步。
 
+Linux 监听策略：
+
+- GNOME Wayland：Shell 扩展事件 + 会话 D-Bus，无轮询。
+- 支持 data-control 的其他 Wayland 桌面：单个长驻 `wl-paste --watch`。
+- X11：`xclip`/`xsel` 后备监听。
+
+旧版本每 350 ms 启动一次 `wl-paste`，会造成 GNOME Dock 图标反复闪烁、干扰
+输入法，并可能因某次读取阻塞而停止发送。当前版本已移除 GNOME 上的进程轮询。
+
 自定义监听端口：
 
 ```bash
@@ -142,7 +167,7 @@ IP 地址只用于定位，不再作为信任依据。
 1. 局域网组播与直接 IP 发现：已完成。
 2. 双向纯文本剪贴板同步 MVP：当前阶段。
 3. 设备配对、身份认证和加密传输。
-4. Windows 原生事件监听，以及针对不同 Linux 桌面的原生事件集成。
+4. 扩展更多原生事件监听与桌面环境兼容性。
 5. 图片、文件、托盘界面、开机启动和安装包。
 
 ## 开发检查

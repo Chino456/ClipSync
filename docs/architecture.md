@@ -71,6 +71,13 @@ over D-Bus, following the architecture demonstrated by Clipman. This is an
 explicit platform integration, not something a generic Rust clipboard crate can
 reliably hide.
 
+The current implementation follows that split. GNOME uses the bundled
+`clipsync@local` Shell extension to receive clipboard owner-change events and
+forward bounded text over session D-Bus to `org.clipsync.Daemon`. It never starts
+a clipboard command on a timer. Other Wayland compositors use one persistent
+`wl-paste --watch` supervisor with bounded length-prefixed helper frames and
+automatic restart. Only X11 retains the command-based polling fallback.
+
 ## Loop and conflict control
 
 Every clipboard event will carry an event UUID, origin device UUID, monotonic

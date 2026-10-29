@@ -14,3 +14,5 @@ clipsync-core = { path = "../clipsync-core" }
 socket2.workspace = true
 uuid.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = "5.19.0"

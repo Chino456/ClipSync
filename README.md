@@ -89,6 +89,19 @@ either device, then paste normally with `Ctrl+V` on the other device. TCP port
 Linux Wayland requires `wl-clipboard`. Linux X11 requires `xclip` or `xsel`.
 Windows uses the native Unicode clipboard API and has no extra dependency.
 
+GNOME Wayland also requires ClipSync's event bridge extension:
+
+```bash
+cargo run --release -- setup-gnome
+# Log out and back in once, then:
+gnome-extensions enable clipsync@local
+```
+
+The extension observes clipboard ownership inside GNOME Shell and forwards text
+to the local ClipSync process over the session D-Bus. It never accesses the
+network. Other compatible Wayland compositors use one persistent
+`wl-paste --watch` process; X11 retains the `xclip`/`xsel` fallback.
+
 > **Security notice:** this milestone deliberately keeps pairing and encrypted
 > transport separate. Clipboard traffic is currently unencrypted. Use it only
 > between devices you control on a network you trust. Authenticated pairing and

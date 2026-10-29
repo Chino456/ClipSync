@@ -12,6 +12,7 @@ use socket2::{Domain, Protocol, Socket, Type};
 use uuid::Uuid;
 
 mod clipboard;
+mod gnome_extension;
 mod sync;
 
 const MULTICAST_ADDRESS: Ipv4Addr = Ipv4Addr::new(239, 255, 67, 83);
@@ -44,6 +45,13 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    if env::args().nth(1).as_deref() == Some("__clipboard-frame") {
+        return clipboard::run_frame_helper();
+    }
+    if env::args().nth(1).as_deref() == Some("setup-gnome") {
+        return gnome_extension::install();
+    }
     if env::args().nth(1).as_deref() == Some("sync") {
         return sync::run(env::args().skip(2));
     }
@@ -194,7 +202,7 @@ fn parse_direct_peer(value: &str) -> Result<SocketAddrV4, String> {
 }
 
 fn usage() -> String {
-    "usage:\n  clipsync discover <device-name> [--peer <IPv4[:port]>]... [--no-multicast]\n  clipsync sync <device-name> [--peer <IPv4[:port]>] [--port <port>]".to_owned()
+    "usage:\n  clipsync discover <device-name> [--peer <IPv4[:port]>]... [--no-multicast]\n  clipsync sync <device-name> [--peer <IPv4[:port]>] [--port <port>]\n  clipsync setup-gnome".to_owned()
 }
 
 fn discovery_socket(multicast_enabled: bool) -> io::Result<UdpSocket> {
