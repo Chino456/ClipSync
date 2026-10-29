@@ -1,7 +1,11 @@
+#[cfg(target_os = "linux")]
 use std::{env, fs, io, path::PathBuf, process::Command};
 
+#[cfg(target_os = "linux")]
 const UUID: &str = "clipsync@local";
+#[cfg(target_os = "linux")]
 const EXTENSION_JS: &str = include_str!("../../../gnome-extension/extension.js");
+#[cfg(target_os = "linux")]
 const METADATA_JSON: &str = include_str!("../../../gnome-extension/metadata.json");
 
 #[cfg(target_os = "linux")]
