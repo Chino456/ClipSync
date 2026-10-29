@@ -129,27 +129,29 @@ Transport peer: Linux laptop [linux]
 双向的，不需要再建立反向连接。程序启动前已经存在的剪贴板内容不会自动发送，
 只有启动后的变化会同步。
 
-## 单按钮 GUI
+## 匹配码 GUI
 
-GUI 保留了 `sync` 命令的参数，但窗口中只有一个按钮。第一次点击“开始连接”会
-启动同步，再次点击“停止连接”会结束同步及其剪贴板监听进程；关闭窗口也会自动
-停止。建立协议连接后，按钮会显示“已连接：设备名（点击停止）”；连接意外中断
-时则显示“连接已停止（点击重试）”。
-
-例如，让 Linux 作为监听端：
+GUI 不需要任何启动参数，设备名会从系统主机名自动获取：
 
 ```bash
-target/release/clipsync-gui "Linux laptop"
+# Linux
+target/release/clipsync-gui
 ```
-
-让 Windows 通过 Linux 的 IP 主动连接：
 
 ```powershell
-target\release\clipsync-gui.exe "Windows desktop" --peer 10.20.30.41
+# Windows
+target\release\clipsync-gui.exe
 ```
 
-也可以把 `--port`、带端口的 `--peer` 等原有参数原样传给 GUI。Linux 使用系统
-GTK 3，Windows 使用原生 Win32 窗口，不需要额外安装 GUI 框架。
+启动后程序会自动监听，并在按钮上显示本机 8 位匹配码。另一台设备点击按钮、
+输入这个匹配码并选择“连接”即可。建立协议连接后，按钮显示“已连接：设备名”；
+再次点击会停止连接。匹配码不区分大小写，其中的连字符可以省略。
+
+当前匹配码是无服务器局域网方案：它编码了本机 IPv4 地址并带有输入错误校验，
+因此能绕过校园网对组播发现的限制，但不能绕过完全禁止客户端互访的 AP 隔离。
+它目前只替代手动输入 IP，并不提供身份认证；安全配对和加密仍属于后续阶段。
+
+Linux 使用系统 GTK 3，Windows 使用原生 Win32 窗口，不需要额外安装 GUI 框架。
 
 Linux 监听策略：
 

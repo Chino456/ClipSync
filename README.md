@@ -88,27 +88,25 @@ either device, then paste normally with `Ctrl+V` on the other device. TCP port
 
 ### Single-button GUI
 
-`cargo build --release` now also builds `clipsync-gui` (`clipsync-gui.exe` on
+`cargo build --release` also builds `clipsync-gui` (`clipsync-gui.exe` on
 Windows). Keep it beside the `clipsync` executable because it starts the CLI
-transport in the background.
-
-Start a listening Linux device with:
+transport in the background. No command-line arguments are required:
 
 ```bash
-target/release/clipsync-gui "Linux laptop"
+target/release/clipsync-gui
 ```
-
-Connect from Windows by IP with:
 
 ```powershell
-target\release\clipsync-gui.exe "Windows desktop" --peer 10.20.30.41
+target\release\clipsync-gui.exe
 ```
 
-The window has one button: click it once to start synchronization and again to
-stop it. After the protocol handshake, the button shows the connected device's
-name. Closing the window also stops the transport and clipboard watcher.
-All existing `sync` arguments, including `--port`, can be passed to the GUI.
-Linux uses the system GTK 3 runtime; Windows uses a native Win32 window.
+Each device displays an eight-character pairing code and starts listening. On
+the other device, click the button and enter that code to connect. The code
+encodes the device's LAN IPv4 address with a typo-detection checksum, so it
+replaces manual IP entry without requiring a rendezvous server. It bypasses
+blocked multicast discovery but cannot bypass full AP/client isolation, and it
+does not yet authenticate the peer. Linux uses the system GTK 3 runtime;
+Windows uses a native Win32 window.
 
 Linux Wayland requires `wl-clipboard`. Linux X11 requires `xclip` or `xsel`.
 Windows uses the native Unicode clipboard API and has no extra dependency.
