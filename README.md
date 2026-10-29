@@ -105,7 +105,8 @@ target\release\clipsync-gui.exe "Windows desktop" --peer 10.20.30.41
 ```
 
 The window has one button: click it once to start synchronization and again to
-stop it. Closing the window also stops the transport and clipboard watcher.
+stop it. After the protocol handshake, the button shows the connected device's
+name. Closing the window also stops the transport and clipboard watcher.
 All existing `sync` arguments, including `--port`, can be passed to the GUI.
 Linux uses the system GTK 3 runtime; Windows uses a native Win32 window.
 

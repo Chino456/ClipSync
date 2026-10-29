@@ -1,12 +1,20 @@
 use std::{
-    io,
+    io::{self, BufRead, BufReader},
     path::PathBuf,
     process::{Child, Command, Stdio},
+    sync::mpsc::{self, Receiver},
+    thread,
 };
+
+enum ProcessUpdate {
+    Connected(String),
+    Stopped,
+}
 
 struct SyncProcess {
     arguments: Vec<String>,
     child: Option<Child>,
+    updates: Option<Receiver<String>>,
 }
 
 impl SyncProcess {
@@ -14,6 +22,7 @@ impl SyncProcess {
         Self {
             arguments,
             child: None,
+            updates: None,
         }
     }
 
@@ -25,6 +34,7 @@ impl SyncProcess {
             Ok(None) => true,
             Ok(Some(_)) | Err(_) => {
                 self.child = None;
+                self.updates = None;
                 false
             }
         }
@@ -46,7 +56,7 @@ impl SyncProcess {
             .arg("sync")
             .args(&self.arguments)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::null());
         #[cfg(unix)]
         {
@@ -59,7 +69,21 @@ impl SyncProcess {
             // Keep the CLI transport completely behind the GUI window.
             command.creation_flags(0x0800_0000);
         }
-        self.child = Some(command.spawn()?);
+        let mut child = command.spawn()?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("failed to capture ClipSync output"))?;
+        let (sender, receiver) = mpsc::channel();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if let Some(peer) = parse_transport_peer(&line) {
+                    let _ = sender.send(peer.to_owned());
+                }
+            }
+        });
+        self.child = Some(child);
+        self.updates = Some(receiver);
         Ok(())
     }
 
@@ -67,6 +91,7 @@ impl SyncProcess {
         let Some(mut child) = self.child.take() else {
             return;
         };
+        self.updates = None;
         #[cfg(unix)]
         unsafe {
             // The child is the leader of a dedicated process group. A negative
@@ -87,6 +112,19 @@ impl SyncProcess {
             Ok(true)
         }
     }
+
+    fn poll_update(&mut self) -> Option<ProcessUpdate> {
+        let connected = self
+            .updates
+            .as_ref()
+            .and_then(|updates| updates.try_iter().last());
+        let was_running = self.child.is_some();
+        if was_running && !self.is_running() {
+            Some(ProcessUpdate::Stopped)
+        } else {
+            connected.map(ProcessUpdate::Connected)
+        }
+    }
 }
 
 impl Drop for SyncProcess {
@@ -102,6 +140,26 @@ fn sync_executable() -> io::Result<PathBuf> {
     #[cfg(not(target_os = "windows"))]
     let file_name = "clipsync";
     Ok(executable.with_file_name(file_name))
+}
+
+fn parse_transport_peer(line: &str) -> Option<&str> {
+    line.strip_prefix("Transport peer: ")?
+        .rsplit_once(" [")
+        .map(|(device_name, _)| device_name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_transport_peer;
+
+    #[test]
+    fn extracts_connected_device_name() {
+        assert_eq!(
+            parse_transport_peer("Transport peer: Linux laptop [linux]"),
+            Some("Linux laptop")
+        );
+        assert_eq!(parse_transport_peer("Connected to 10.0.0.2:24872"), None);
+    }
 }
 
 #[cfg(unix)]
@@ -136,6 +194,7 @@ mod linux {
 
     type Widget = *mut std::ffi::c_void;
     type SignalCallback = unsafe extern "C" fn();
+    type TimeoutCallback = unsafe extern "C" fn(*mut std::ffi::c_void) -> i32;
 
     struct GtkApi {
         gtk_init: unsafe extern "C" fn(*mut i32, *mut *mut *mut c_char),
@@ -156,6 +215,8 @@ mod linux {
             Option<unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void)>,
             u32,
         ) -> u64,
+        g_timeout_add:
+            unsafe extern "C" fn(u32, Option<TimeoutCallback>, *mut std::ffi::c_void) -> u32,
     }
 
     static GTK: OnceLock<GtkApi> = OnceLock::new();
@@ -188,6 +249,7 @@ mod linux {
             let state = Box::into_raw(state);
             connect_signal(button, "clicked", on_clicked, state.cast())?;
             connect_signal(window, "destroy", on_destroy, state.cast())?;
+            (api.g_timeout_add)(100, Some(on_timer), state.cast());
             (api.gtk_widget_show_all)(window);
             (api.gtk_main)();
 
@@ -220,13 +282,25 @@ mod linux {
     unsafe extern "C" fn on_clicked(_button: Widget, state: *mut State) {
         let state = unsafe { &mut *state };
         let label = match state.process.toggle() {
-            Ok(true) => "停止连接",
+            Ok(true) => "正在等待连接（点击停止）",
             Ok(false) => "开始连接",
             Err(_) => "启动失败",
         };
-        if let Ok(label) = CString::new(label) {
-            unsafe { (GTK.get().unwrap().gtk_button_set_label)(state.button, label.as_ptr()) };
+        set_button_label(state.button, label);
+    }
+
+    unsafe extern "C" fn on_timer(state: *mut std::ffi::c_void) -> i32 {
+        let state = unsafe { &mut *state.cast::<State>() };
+        match state.process.poll_update() {
+            Some(ProcessUpdate::Connected(peer)) => {
+                set_button_label(state.button, &format!("已连接：{peer}（点击停止）"));
+            }
+            Some(ProcessUpdate::Stopped) => {
+                set_button_label(state.button, "连接已停止（点击重试）")
+            }
+            None => {}
         }
+        1
     }
 
     unsafe extern "C" fn on_destroy(_window: Widget, state: *mut State) {
@@ -234,9 +308,16 @@ mod linux {
         unsafe { (GTK.get().unwrap().gtk_main_quit)() };
     }
 
+    fn set_button_label(button: Widget, label: &str) {
+        if let Ok(label) = CString::new(label) {
+            unsafe { (GTK.get().unwrap().gtk_button_set_label)(button, label.as_ptr()) };
+        }
+    }
+
     fn load_gtk() -> Result<GtkApi, Box<dyn std::error::Error>> {
         let gtk = Box::leak(Box::new(unsafe { Library::new("libgtk-3.so.0")? }));
         let gobject = Box::leak(Box::new(unsafe { Library::new("libgobject-2.0.so.0")? }));
+        let glib = Box::leak(Box::new(unsafe { Library::new("libglib-2.0.so.0")? }));
         unsafe {
             Ok(GtkApi {
                 gtk_init: *gtk.get(b"gtk_init\0")?,
@@ -250,6 +331,7 @@ mod linux {
                 gtk_container_add: *gtk.get(b"gtk_container_add\0")?,
                 gtk_widget_show_all: *gtk.get(b"gtk_widget_show_all\0")?,
                 g_signal_connect_data: *gobject.get(b"g_signal_connect_data\0")?,
+                g_timeout_add: *glib.get(b"g_timeout_add\0")?,
             })
         }
     }
@@ -268,6 +350,7 @@ mod windows {
 
     const WM_CREATE: u32 = 0x0001;
     const WM_DESTROY: u32 = 0x0002;
+    const WM_TIMER: u32 = 0x0113;
     const WM_COMMAND: u32 = 0x0111;
     const GWLP_USERDATA: i32 = -21;
     const WS_OVERLAPPED: u32 = 0x00000000;
@@ -279,6 +362,7 @@ mod windows {
     const BS_PUSHBUTTON: u32 = 0x00000000;
     const CW_USEDEFAULT: i32 = i32::MIN;
     const BUTTON_ID: usize = 1001;
+    const STATUS_TIMER_ID: usize = 1;
 
     #[repr(C)]
     struct WndClassW {
@@ -352,6 +436,8 @@ mod windows {
         fn SetWindowLongPtrW(hwnd: Hwnd, index: i32, value: isize) -> isize;
         fn GetWindowLongPtrW(hwnd: Hwnd, index: i32) -> isize;
         fn SetWindowTextW(hwnd: Hwnd, text: *const u16) -> i32;
+        fn SetTimer(hwnd: Hwnd, event_id: usize, interval_ms: u32, callback: *mut c_void) -> usize;
+        fn KillTimer(hwnd: Hwnd, event_id: usize) -> i32;
     }
 
     #[link(name = "kernel32")]
@@ -391,7 +477,7 @@ mod windows {
                 WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                320,
+                380,
                 160,
                 ptr::null_mut(),
                 ptr::null_mut(),
@@ -432,9 +518,9 @@ mod windows {
                         button_class.as_ptr(),
                         label.as_ptr(),
                         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                        60,
+                        40,
                         35,
-                        180,
+                        300,
                         50,
                         hwnd,
                         BUTTON_ID as *mut c_void,
@@ -443,22 +529,39 @@ mod windows {
                     )
                 };
                 unsafe { (*state).button = button };
+                unsafe { SetTimer(hwnd, STATUS_TIMER_ID, 100, ptr::null_mut()) };
                 0
             }
             WM_COMMAND if wparam & 0xffff == BUTTON_ID => {
                 let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State };
                 if !state.is_null() {
                     let label = match unsafe { (*state).process.toggle() } {
-                        Ok(true) => "停止连接",
+                        Ok(true) => "正在等待连接（点击停止）",
                         Ok(false) => "开始连接",
                         Err(_) => "启动失败",
                     };
-                    let label = wide(label);
-                    unsafe { SetWindowTextW((*state).button, label.as_ptr()) };
+                    set_button_label(unsafe { (*state).button }, label);
+                }
+                0
+            }
+            WM_TIMER if wparam == STATUS_TIMER_ID => {
+                let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State };
+                if !state.is_null() {
+                    match unsafe { (*state).process.poll_update() } {
+                        Some(ProcessUpdate::Connected(peer)) => set_button_label(
+                            unsafe { (*state).button },
+                            &format!("已连接：{peer}（点击停止）"),
+                        ),
+                        Some(ProcessUpdate::Stopped) => {
+                            set_button_label(unsafe { (*state).button }, "连接已停止（点击重试）")
+                        }
+                        None => {}
+                    }
                 }
                 0
             }
             WM_DESTROY => {
+                unsafe { KillTimer(hwnd, STATUS_TIMER_ID) };
                 let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State };
                 if !state.is_null() {
                     unsafe { (*state).process.stop() };
@@ -472,5 +575,10 @@ mod windows {
 
     fn wide(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(Some(0)).collect()
+    }
+
+    fn set_button_label(button: Hwnd, label: &str) {
+        let label = wide(label);
+        unsafe { SetWindowTextW(button, label.as_ptr()) };
     }
 }
