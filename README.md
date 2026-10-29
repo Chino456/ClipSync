@@ -7,8 +7,8 @@ between Windows and Linux machines on the same LAN.
 
 ## Phase 1: LAN discovery
 
-The current executable only discovers peers. It does **not** read, transmit, or
-write clipboard data yet, and discovery does not imply trust.
+The CLI supports both peer discovery and text clipboard synchronization.
+Discovery by itself does not imply trust.
 
 Build and run it on two machines connected to the same LAN:
 
@@ -34,15 +34,15 @@ address. The other side can keep using the normal command because it replies
 directly to the source address:
 
 ```bash
-cargo run --release -- discover "Linux laptop" --peer 10.20.30.41
+cargo run --release -- discover "Linux laptop" --peer 192.0.2.41
 ```
 
 Multiple known addresses and a non-default port are supported:
 
 ```bash
 cargo run --release -- discover "Linux laptop" \
-  --peer 10.20.30.41 \
-  --peer 10.20.30.42:24871
+  --peer 192.0.2.41 \
+  --peer 192.0.2.42:24871
 ```
 
 To use only unicast without joining the multicast group, start one device in
@@ -56,7 +56,7 @@ Then point the other device at it:
 
 ```powershell
 cargo run --release -- discover "Windows desktop" `
-  --peer 10.20.30.41 --no-multicast
+  --peer 192.0.2.41 --no-multicast
 ```
 
 Find the address with `ipconfig` on Windows or `ip -4 addr` on Linux. Direct IP
@@ -79,7 +79,7 @@ cargo run --release -- sync "Linux laptop"
 On the device that initiates the connection:
 
 ```powershell
-cargo run --release -- sync "Windows desktop" --peer 10.20.30.41
+cargo run --release -- sync "Windows desktop" --peer 192.0.2.41
 ```
 
 Both directions are active after the connection is established. Copy text on
@@ -89,9 +89,9 @@ either device, then paste normally with `Ctrl+V` on the other device. TCP port
 ### Tauri 2 GUI
 
 The GUI has been rebuilt with Tauri 2 and requires no command-line arguments.
-It displays the local IPv4 address above one centered **Start connection**
-button. The system hostname is obtained automatically and used as the device
-name during the connection handshake.
+It displays the local IPv4 address above a centered **Start connection** button
+and an autostart switch. The current login name (`USERNAME` on Windows,
+`USER`/`LOGNAME` on Linux) is used during the connection handshake.
 
 Build it with:
 
@@ -109,12 +109,23 @@ target/release/clipsync-gui
 target\release\clipsync-gui.exe
 ```
 
-Both devices start listening when the GUI opens. Click the button, enter the IP
-shown by the other device, and confirm to connect. After the handshake, the
-button shows the peer's automatically detected hostname. Keep `clipsync` beside
-`clipsync-gui`, as the GUI starts the existing transport executable in the
-background. The pairing-code experiment has been removed. Building on
-Ubuntu/Debian requires `libwebkit2gtk-4.1-dev`; Windows uses WebView2.
+The first GUI launch starts one persistent background service. Further GUI
+instances reuse it, and closing the window does not stop synchronization. Click
+the button, enter the IP shown by the other device, and confirm to connect.
+After a successful handshake, the peer login name is shown and up to five
+recent successful IPs are saved locally. The service tries those IPs at its next
+start; if none connect, it silently returns to listening and the button remains
+**Start connection**.
+
+The autostart switch starts only the background service at login, without
+opening the GUI. It uses the per-user XDG autostart file on Linux and the
+per-user `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run` entry on
+Windows. Keep `clipsync` beside `clipsync-gui`, as the service starts that
+transport executable. The pairing-code experiment has been removed. Building
+on Ubuntu/Debian requires `libwebkit2gtk-4.1-dev`; Windows uses WebView2.
+
+All `192.0.2.0/24` addresses in this documentation are reserved examples, not
+real developer or user addresses. Enter the LAN IPv4 shown on the other device.
 
 Linux Wayland requires `wl-clipboard`. Linux X11 requires `xclip` or `xsel`.
 Windows uses the native Unicode clipboard API and has no extra dependency.
@@ -149,7 +160,8 @@ network. Other compatible Wayland compositors use one persistent
 4. **Native event adapters:** Win32 event listener and compositor-specific Linux
    event integrations to replace the MVP polling adapter.
 5. **Rich content and product shell:** images/files, tray UI, device management,
-   autostart, packaging, and diagnostics.
+   packaging, and diagnostics. Persistent background service and autostart are
+   implemented.
 
 ## Development
 

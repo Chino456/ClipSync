@@ -11,4 +11,5 @@ tauri-build = { version = "2.7.1", features = [] }
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
 tauri = { version = "2.12.1", default-features = false, features = ["compression", "wry", "x11"] }

@@ -59,7 +59,8 @@ cargo build --release
 - Linux：`target/release/clipsync` 和 `target/release/clipsync-gui`
 - Windows：`target\release\clipsync.exe` 和 `target\release\clipsync-gui.exe`
 
-当前 Tauri 界面与 CLI 传输程序是两个独立构建产物；下一阶段再接入现有同步逻辑。
+Tauri 界面与 CLI 传输程序是两个独立构建产物，GUI 后台服务会调用同目录中的
+CLI 完成剪贴板同步。
 
 ## 局域网设备发现
 
@@ -76,7 +77,7 @@ cargo run --release -- discover "Windows desktop"
 双方应在几秒内显示：
 
 ```text
-+ Found Windows desktop [windows] at 10.20.30.42 ...
++ Found Windows desktop [windows] at 192.0.2.42 ...
 ```
 
 自动发现使用 IPv4 UDP 组播地址 `239.255.67.83:24871`。Windows 防火墙询问
@@ -94,7 +95,7 @@ cargo run --release -- discover "Linux laptop" --no-multicast
 
 ```powershell
 cargo run --release -- discover "Windows desktop" `
-  --peer 10.20.30.41 --no-multicast
+  --peer 192.0.2.41 --no-multicast
 ```
 
 查询地址：
@@ -115,13 +116,13 @@ cargo run --release -- sync "Linux laptop"
 默认监听 TCP `0.0.0.0:24872`。然后在 Windows 上填写 Linux 的 IP：
 
 ```powershell
-cargo run --release -- sync "Windows desktop" --peer 10.20.30.41
+cargo run --release -- sync "Windows desktop" --peer 192.0.2.41
 ```
 
 出现以下信息表示连接建立：
 
 ```text
-Connected to 10.20.30.41:24872
+Connected to 192.0.2.41:24872
 Transport peer: Linux laptop [linux]
 ```
 
@@ -132,8 +133,8 @@ Transport peer: Linux laptop [linux]
 ## Tauri 2 GUI
 
 GUI 已使用 Tauri 2 重构，不需要任何启动参数。窗口中央显示本机 IPv4，其下方
-是“开始连接”按钮；设备名从 Windows 的 `COMPUTERNAME` 或 Linux 的 `HOSTNAME`
-自动获取并用于连接握手。
+是“开始连接”按钮和“开机自启”开关。连接时使用当前登录用户的名称：Windows
+读取 `USERNAME`，Linux 读取 `USER`/`LOGNAME`。
 
 构建 GUI：
 
@@ -153,10 +154,20 @@ target/release/clipsync-gui
 target\release\clipsync-gui.exe
 ```
 
-两台设备启动后都会自动监听。点击“开始连接”，输入另一台设备界面上显示的 IP
-地址并确认即可连接。成功后按钮会显示对端自动获取的系统主机名。GUI 会调用
-同目录中的 `clipsync` 传输程序，因此分发时需要把两个可执行文件放在一起。
-匹配码机制已经完全移除。
+首次打开 GUI 会启动一个单实例后台服务；再次打开 GUI 不会重复启动服务，关闭
+窗口也不会停止剪贴板同步。点击“开始连接”，输入另一台设备界面上显示的 IP
+地址并确认即可连接。成功后按钮会显示对端用户名，并在本机配置目录保存最近成功
+连接的 IP（最多 5 个）。后台服务下次启动会依次尝试这些地址；全部不可达时继续
+监听，按钮恢复显示“开始连接”，不会显示失败状态。
+
+“开机自启”开启后只自动启动后台同步服务，不弹出 GUI。Linux 写入当前用户的
+`~/.config/autostart/clipsync.desktop`（尊重 `XDG_CONFIG_HOME`）；Windows 写入
+当前用户的 `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run`。关闭开关
+会移除对应注册。GUI 会调用同目录中的 `clipsync` 传输程序，因此分发时需要把
+两个可执行文件放在一起。匹配码机制已经完全移除。
+
+文档中的 `192.0.2.0/24` 地址属于专用文档示例网段，不是任何开发者或用户的真实
+地址；实际使用时请填写另一台设备界面显示的局域网 IPv4。
 
 Ubuntu/Debian 构建 Tauri GUI 前需要安装 WebKitGTK 开发依赖：
 
@@ -184,7 +195,7 @@ cargo run --release -- sync "Linux laptop" --port 25000
 连接自定义端口：
 
 ```powershell
-cargo run --release -- sync "Windows desktop" --peer 10.20.30.41:25000
+cargo run --release -- sync "Windows desktop" --peer 192.0.2.41:25000
 ```
 
 ### 防火墙
@@ -207,7 +218,7 @@ IP 地址只用于定位，不再作为信任依据。
 2. 双向纯文本剪贴板同步 MVP：当前阶段。
 3. 设备配对、身份认证和加密传输。
 4. 扩展更多原生事件监听与桌面环境兼容性。
-5. 图片、文件、托盘界面、开机启动和安装包。
+5. 图片、文件、托盘界面和安装包；后台常驻与开机启动已完成。
 
 ## 开发检查
 

@@ -249,17 +249,17 @@ mod tests {
             "discover",
             "Laptop",
             "--peer",
-            "10.20.30.40",
+            "192.0.2.40",
             "--peer",
-            "10.20.30.41:25000",
+            "192.0.2.41:25000",
             "--no-multicast",
         ]))
         .unwrap();
         assert_eq!(
             config.direct_peers,
             vec![
-                SocketAddrV4::new(Ipv4Addr::new(10, 20, 30, 40), DISCOVERY_PORT),
-                SocketAddrV4::new(Ipv4Addr::new(10, 20, 30, 41), 25_000),
+                SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 40), DISCOVERY_PORT),
+                SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 41), 25_000),
             ]
         );
         assert!(!config.multicast_enabled);

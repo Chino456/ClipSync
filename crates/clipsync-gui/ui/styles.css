@@ -98,6 +98,68 @@ body {
   transform: none;
 }
 
+.autostart-setting {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #5e687d;
+  cursor: pointer;
+  font-size: 14px;
+  user-select: none;
+}
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  width: 42px;
+  height: 24px;
+}
+
+.switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.switch-track {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #c7ceda;
+  transition: background 150ms ease;
+}
+
+.switch-track::after {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 2px 5px rgba(18, 27, 46, 0.24);
+  content: "";
+  inset: 3px auto auto 3px;
+  transition: transform 150ms ease;
+}
+
+.switch input:checked + .switch-track {
+  background: #356df3;
+}
+
+.switch input:checked + .switch-track::after {
+  transform: translateX(18px);
+}
+
+.switch input:focus-visible + .switch-track {
+  outline: 3px solid rgba(53, 109, 243, 0.24);
+  outline-offset: 3px;
+}
+
+.switch input:disabled + .switch-track {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 .dialog-backdrop {
   position: fixed;
   z-index: 10;

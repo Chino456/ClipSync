@@ -6,6 +6,7 @@ const form = document.querySelector("#connect-form");
 const peerIp = document.querySelector("#peer-ip");
 const dialogError = document.querySelector("#dialog-error");
 const cancelButton = document.querySelector("#cancel-button");
+const autostartToggle = document.querySelector("#autostart-toggle");
 
 let submitting = false;
 
@@ -45,14 +46,22 @@ async function refreshConnectionStatus() {
         connectButton.classList.remove("connected");
         break;
       case "error":
-        connectButton.textContent = "连接失败，点击重试";
-        connectButton.title = status.message ?? "";
+        connectButton.textContent = "开始连接";
+        connectButton.title = "";
         connectButton.classList.remove("connected");
         break;
       default:
         connectButton.textContent = "开始连接";
         connectButton.classList.remove("connected");
     }
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function loadAutostart() {
+  try {
+    autostartToggle.checked = await invoke("autostart_enabled");
   } catch (error) {
     console.error(error);
   }
@@ -87,6 +96,20 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
+autostartToggle.addEventListener("change", async () => {
+  const requested = autostartToggle.checked;
+  autostartToggle.disabled = true;
+  try {
+    autostartToggle.checked = await invoke("set_autostart", { enabled: requested });
+  } catch (error) {
+    autostartToggle.checked = !requested;
+    console.error(error);
+  } finally {
+    autostartToggle.disabled = false;
+  }
+});
+
 loadDeviceInfo();
+loadAutostart();
 refreshConnectionStatus();
 setInterval(refreshConnectionStatus, 500);
