@@ -36,11 +36,11 @@ impl ServiceStatus {
         }
     }
 
-    fn connecting(ip: Ipv4Addr) -> Self {
+    fn connecting(ip: Ipv4Addr, show_progress: bool) -> Self {
         Self {
             phase: "connecting".to_owned(),
             peer_name: None,
-            message: Some(format!("正在连接 {ip}")),
+            message: show_progress.then(|| format!("正在连接 {ip}")),
         }
     }
 
@@ -84,18 +84,23 @@ impl ServiceManager {
     }
 
     fn start_listener(&mut self) -> io::Result<()> {
-        self.start(None)
+        self.start(None, false)
     }
 
     fn connect(&mut self, peer: Ipv4Addr) -> io::Result<()> {
-        self.start(Some(peer))
+        self.start(Some(peer), true)
     }
 
-    fn start(&mut self, peer: Option<Ipv4Addr>) -> io::Result<()> {
+    fn connect_in_background(&mut self, peer: Ipv4Addr) -> io::Result<()> {
+        self.start(Some(peer), false)
+    }
+
+    fn start(&mut self, peer: Option<Ipv4Addr>, show_progress: bool) -> io::Result<()> {
         self.stop();
         let generation = self.generation.fetch_add(1, Ordering::AcqRel) + 1;
-        *self.status.lock().unwrap() =
-            peer.map_or_else(ServiceStatus::listening, ServiceStatus::connecting);
+        *self.status.lock().unwrap() = peer.map_or_else(ServiceStatus::listening, |ip| {
+            ServiceStatus::connecting(ip, show_progress)
+        });
 
         let mut command = Command::new(sync_executable()?);
         command
@@ -143,7 +148,9 @@ impl ServiceManager {
 
         let status = Arc::clone(&self.status);
         let active_generation = Arc::clone(&self.generation);
-        let waiting_status = peer.map_or_else(ServiceStatus::listening, ServiceStatus::connecting);
+        let waiting_status = peer.map_or_else(ServiceStatus::listening, |ip| {
+            ServiceStatus::connecting(ip, show_progress)
+        });
         thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                 if line.starts_with("Connection ended:")
@@ -312,7 +319,7 @@ fn start_next_saved_peer(
     peers: &mut VecDeque<Ipv4Addr>,
 ) -> Option<Instant> {
     if let Some(peer) = peers.pop_front() {
-        if manager.connect(peer).is_ok() {
+        if manager.connect_in_background(peer).is_ok() {
             return Some(Instant::now() + AUTO_CONNECT_TIMEOUT);
         }
         return start_next_saved_peer(manager, peers);
@@ -428,7 +435,7 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
-    use super::{device_name, parse_incoming_ip, parse_transport_peer};
+    use super::{ServiceStatus, device_name, parse_incoming_ip, parse_transport_peer};
 
     #[test]
     fn linux_or_windows_user_name_is_never_empty() {
@@ -445,5 +452,12 @@ mod tests {
             parse_transport_peer("Transport peer: example-user [linux]"),
             Some("example-user")
         );
+    }
+
+    #[test]
+    fn background_connection_does_not_expose_progress_message() {
+        let peer = "192.0.2.10".parse().unwrap();
+        assert!(ServiceStatus::connecting(peer, false).message.is_none());
+        assert!(ServiceStatus::connecting(peer, true).message.is_some());
     }
 }

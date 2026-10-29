@@ -158,7 +158,9 @@ target\release\clipsync-gui.exe
 窗口也不会停止剪贴板同步。点击“开始连接”，输入另一台设备界面上显示的 IP
 地址并确认即可连接。成功后按钮会显示对端用户名，并在本机配置目录保存最近成功
 连接的 IP（最多 5 个）。后台服务下次启动会依次尝试这些地址；全部不可达时继续
-监听，按钮恢复显示“开始连接”，不会显示失败状态。
+监听。自动尝试期间按钮始终显示“开始连接”，不会显示正在连接或失败状态；只有
+握手成功后才显示已连接的对端用户名。任意一端的底层 `clipsync` 进程退出或网络
+连接断开时，另一端也会立即退出“已连接”状态。
 
 “开机自启”开启后只自动启动后台同步服务，不弹出 GUI。Linux 写入当前用户的
 `~/.config/autostart/clipsync.desktop`（尊重 `XDG_CONFIG_HOME`）；Windows 写入
@@ -176,6 +178,104 @@ sudo apt install libwebkit2gtk-4.1-dev
 ```
 
 Windows 使用系统 WebView2；Windows 10 1803 及之后的版本通常已经预装。
+
+### 便携包
+
+当前 GUI 通过同目录下的 `clipsync` 启动传输服务，因此两个程序必须一起分发。
+先构建：
+
+```bash
+cargo build --release -p clipsync-cli -p clipsync-gui
+```
+
+Linux 可以创建包含两个程序和图标的压缩包：
+
+```bash
+mkdir -p dist/clipsync-linux
+cp target/release/clipsync target/release/clipsync-gui dist/clipsync-linux/
+cp crates/clipsync-gui/icons/icon.png dist/clipsync-linux/
+tar -C dist -czf dist/clipsync-linux-x86_64.tar.gz clipsync-linux
+```
+
+Windows 请在 Windows 主机上构建，然后用 PowerShell 打包：
+
+```powershell
+New-Item -ItemType Directory -Force dist\clipsync-windows | Out-Null
+Copy-Item target\release\clipsync.exe,target\release\clipsync-gui.exe,crates\clipsync-gui\icons\icon.ico dist\clipsync-windows\
+Compress-Archive -Force dist\clipsync-windows\* dist\clipsync-windows-x86_64.zip
+```
+
+不要只复制 `clipsync-gui`，否则后台服务无法启动。
+
+如需生成 Tauri 原生安装包，先安装 Tauri CLI：
+
+```bash
+cargo install tauri-cli --version "^2"
+```
+
+Linux 构建 `.deb` 和 `.AppImage`（sidecar 文件名必须带当前 target triple）：
+
+```bash
+cargo build --release -p clipsync-cli
+target_triple="$(rustc -vV | sed -n 's/^host: //p')"
+mkdir -p crates/clipsync-gui/binaries
+cp target/release/clipsync \
+  "crates/clipsync-gui/binaries/clipsync-$target_triple"
+cd crates/clipsync-gui
+cargo tauri build --config tauri.linux.conf.json
+```
+
+产物位于工作区 `target/release/bundle/deb/` 和
+`target/release/bundle/appimage/`。Windows 请在 Windows 主机的 PowerShell 中运行：
+
+```powershell
+cargo build --release -p clipsync-cli
+$targetTriple = ((rustc -vV | Select-String '^host: ').Line -replace '^host: ', '')
+New-Item -ItemType Directory -Force crates\clipsync-gui\binaries | Out-Null
+Copy-Item target\release\clipsync.exe "crates\clipsync-gui\binaries\clipsync-$targetTriple.exe"
+Set-Location crates\clipsync-gui
+cargo tauri build --config tauri.windows.conf.json
+```
+
+Windows 安装包位于工作区 `target\release\bundle\nsis\` 和
+`target\release\bundle\msi\`。这些专用配置会把传输程序作为 sidecar 一并打包。
+
+### 在 Linux 注册为桌面应用
+
+下面以当前用户安装为例，不需要 `sudo`：
+
+```bash
+install -Dm755 target/release/clipsync "$HOME/.local/lib/clipsync/clipsync"
+install -Dm755 target/release/clipsync-gui "$HOME/.local/lib/clipsync/clipsync-gui"
+install -Dm644 crates/clipsync-gui/icons/icon.png \
+  "$HOME/.local/share/icons/hicolor/1254x1254/apps/clipsync.png"
+mkdir -p "$HOME/.local/share/applications"
+```
+
+创建 `~/.local/share/applications/com.clipsync.desktop.desktop`：
+
+```desktop
+[Desktop Entry]
+Type=Application
+Name=ClipSync
+Comment=局域网剪贴板同步
+Exec=/home/你的用户名/.local/lib/clipsync/clipsync-gui
+Icon=clipsync
+Terminal=false
+Categories=Utility;
+StartupWMClass=com.clipsync.desktop
+```
+
+把 `Exec` 中的“你的用户名”换成当前 Linux 用户名，然后执行：
+
+```bash
+chmod 644 "$HOME/.local/share/applications/com.clipsync.desktop.desktop"
+update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+```
+
+此后可以从应用菜单搜索 ClipSync 并固定到 Dock。GUI 内的“开机自启”会记录
+当前已安装的 `clipsync-gui` 路径，所以应在完成安装后再开启该开关。
 
 Linux 监听策略：
 

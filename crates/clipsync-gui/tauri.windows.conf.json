@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "icon": ["icons/icon.ico"],
+    "externalBin": ["binaries/clipsync"],
+    "category": "Utility",
+    "shortDescription": "LAN clipboard synchronization for Windows and Linux"
+  }
+}

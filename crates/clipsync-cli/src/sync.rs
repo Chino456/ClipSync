@@ -270,8 +270,10 @@ fn handle_connection(
             Err(RecvTimeoutError::Disconnected) => break,
         }
     }
-    let _ = reader_thread.join();
-    Ok(())
+    match reader_thread.join() {
+        Ok(result) => result,
+        Err(_) => Err(io::Error::other("connection reader thread panicked")),
+    }
 }
 
 fn read_messages(stream: &mut TcpStream, incoming: &SyncSender<String>) -> io::Result<()> {

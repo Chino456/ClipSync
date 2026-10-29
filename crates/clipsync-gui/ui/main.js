@@ -42,7 +42,8 @@ async function refreshConnectionStatus() {
         connectButton.classList.add("connected");
         break;
       case "connecting":
-        connectButton.textContent = status.message ?? "正在连接…";
+        connectButton.textContent = status.message ?? "开始连接";
+        connectButton.title = "";
         connectButton.classList.remove("connected");
         break;
       case "error":

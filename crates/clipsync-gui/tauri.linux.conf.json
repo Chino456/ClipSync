@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage"],
+    "icon": ["icons/icon.png"],
+    "externalBin": ["binaries/clipsync"],
+    "category": "Utility",
+    "shortDescription": "LAN clipboard synchronization for Windows and Linux"
+  }
+}

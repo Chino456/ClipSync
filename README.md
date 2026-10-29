@@ -114,8 +114,10 @@ instances reuse it, and closing the window does not stop synchronization. Click
 the button, enter the IP shown by the other device, and confirm to connect.
 After a successful handshake, the peer login name is shown and up to five
 recent successful IPs are saved locally. The service tries those IPs at its next
-start; if none connect, it silently returns to listening and the button remains
-**Start connection**.
+start. Background attempts never replace the **Start connection** button with a
+connecting or failure message; only a completed handshake shows the peer name.
+If either transport process exits or its TCP connection ends, both GUIs leave
+the connected state.
 
 The autostart switch starts only the background service at login, without
 opening the GUI. It uses the per-user XDG autostart file on Linux and the
