@@ -1,0 +1,16 @@
+[package]
+name = "clipsync-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "clipsync"
+path = "src/main.rs"
+
+[dependencies]
+clipsync-core = { path = "../clipsync-core" }
+socket2.workspace = true
+uuid.workspace = true
+
