@@ -28,6 +28,23 @@ The long-running daemon will contain four replaceable layers:
 A tray UI will call the daemon through local IPC rather than own clipboard or
 network state itself. This keeps the eventual UI technology replaceable.
 
+## Current text-sync MVP
+
+The `sync` command opens one bidirectional, length-prefixed TCP stream on port
+24872. One device listens and the other connects by direct IPv4 address. Hello
+and clipboard-text frames are validated as untrusted input; frames and text are
+bounded before allocation/use. Clipboard observation and remote writes run on
+separate workers so a slow Linux clipboard owner cannot block an incoming write.
+
+The initial clipboard value is used only as a baseline and is not transmitted.
+A pending remote value is marked before it is written to the platform clipboard;
+the observation worker consumes that mark instead of sending the value back.
+
+This MVP transport is deliberately not described as paired or secure: it has no
+authentication or encryption yet. It must be limited to explicitly configured,
+user-controlled devices on a trusted network until the pairing milestone binds
+stable device keys and protects every frame with authenticated encryption.
+
 ## Clipboard platform strategy
 
 ### Windows

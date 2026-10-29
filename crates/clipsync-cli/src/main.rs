@@ -11,6 +11,9 @@ use clipsync_core::{DiscoveryMessage, DiscoveryMessageKind};
 use socket2::{Domain, Protocol, Socket, Type};
 use uuid::Uuid;
 
+mod clipboard;
+mod sync;
+
 const MULTICAST_ADDRESS: Ipv4Addr = Ipv4Addr::new(239, 255, 67, 83);
 const DISCOVERY_PORT: u16 = 24_871;
 const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(3);
@@ -34,13 +37,17 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("ClipSync discovery failed: {error}");
+            eprintln!("ClipSync failed: {error}");
             ExitCode::FAILURE
         }
     }
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
+    if env::args().nth(1).as_deref() == Some("sync") {
+        return sync::run(env::args().skip(2));
+    }
+
     let config = parse_args(env::args().skip(1))?;
     let device_id = Uuid::new_v4();
     let local = DiscoveryMessage::new(
@@ -150,10 +157,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> 
         return Err(usage());
     };
     if command != "discover" {
-        return Err(format!(
-            "only the `discover` command is available in phase 1\n{}",
-            usage()
-        ));
+        return Err(format!("unknown command `{command}`\n{}", usage()));
     }
     let Some(device_name) = args.next() else {
         return Err(usage());
@@ -190,7 +194,7 @@ fn parse_direct_peer(value: &str) -> Result<SocketAddrV4, String> {
 }
 
 fn usage() -> String {
-    "usage: clipsync discover <device-name> [--peer <IPv4[:port]>]... [--no-multicast]".to_owned()
+    "usage:\n  clipsync discover <device-name> [--peer <IPv4[:port]>]... [--no-multicast]\n  clipsync sync <device-name> [--peer <IPv4[:port]>] [--port <port>]".to_owned()
 }
 
 fn discovery_socket(multicast_enabled: bool) -> io::Result<UdpSocket> {

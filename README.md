@@ -1,5 +1,7 @@
 # ClipSync
 
+[简体中文](README.zh-CN.md) | English
+
 ClipSync is an incremental prototype for trusted clipboard synchronization
 between Windows and Linux machines on the same LAN.
 
@@ -63,16 +65,46 @@ blocks all traffic between wireless clients. A quick reachability check is
 `ping <peer-ip>`; however, some networks block ICMP while still allowing the UDP
 application port, so the ClipSync probe is the final test.
 
+## Phase 2: text clipboard synchronization (MVP)
+
+The MVP synchronizes UTF-8 plain text up to 1 MiB over one bidirectional TCP
+connection. It does not upload clipboard content that existed before startup.
+
+On the receiving/listening device:
+
+```bash
+cargo run --release -- sync "Linux laptop"
+```
+
+On the device that initiates the connection:
+
+```powershell
+cargo run --release -- sync "Windows desktop" --peer 10.20.30.41
+```
+
+Both directions are active after the connection is established. Copy text on
+either device, then paste normally with `Ctrl+V` on the other device. TCP port
+`24872` must be allowed by the listening device's firewall.
+
+Linux Wayland requires `wl-clipboard`. Linux X11 requires `xclip` or `xsel`.
+Windows uses the native Unicode clipboard API and has no extra dependency.
+
+> **Security notice:** this milestone deliberately keeps pairing and encrypted
+> transport separate. Clipboard traffic is currently unencrypted. Use it only
+> between devices you control on a network you trust. Authenticated pairing and
+> encryption remain the next milestone.
+
 ## Planned milestones
 
-1. **LAN discovery (current):** multicast and direct-IP probes, peer presence,
+1. **LAN discovery (done):** multicast and direct-IP probes, peer presence,
    protocol validation, self-filtering, and expiry.
-2. **Pairing and trust:** persistent device identity, explicit two-device
+2. **Text clipboard MVP (current):** bidirectional TCP text synchronization,
+   native Windows clipboard, Linux Wayland/X11 adapters, limits, and loop
+   suppression.
+3. **Pairing and trust:** persistent device identity, explicit two-device
    confirmation, key exchange, and an encrypted authenticated channel.
-3. **Text clipboard adapters:** native Windows listener; X11 adapter; Wayland
-   adapter with a separate GNOME Shell integration where data-control is absent.
-4. **Automatic text sync:** ordering, payload limits, reconnects, echo-loop
-   suppression, and sensitive-content controls.
+4. **Native event adapters:** Win32 event listener and compositor-specific Linux
+   event integrations to replace the MVP polling adapter.
 5. **Rich content and product shell:** images/files, tray UI, device management,
    autostart, packaging, and diagnostics.
 
