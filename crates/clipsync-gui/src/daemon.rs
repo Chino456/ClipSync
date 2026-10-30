@@ -51,6 +51,14 @@ impl ServiceStatus {
             message: None,
         }
     }
+
+    pub fn stopped() -> Self {
+        Self {
+            phase: "stopped".to_owned(),
+            peer_name: None,
+            message: Some("进程已结束".to_owned()),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -58,6 +66,14 @@ impl ServiceStatus {
 pub enum ControlRequest {
     Status,
     Connect { ip: Ipv4Addr },
+    Shutdown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlAction {
+    None,
+    ManualConnect,
+    Shutdown,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -205,12 +221,14 @@ pub fn run() -> io::Result<()> {
 
     loop {
         match listener.accept() {
-            Ok((stream, _)) => {
-                if handle_control(stream, &mut manager).unwrap_or(false) {
+            Ok((stream, _)) => match handle_control(stream, &mut manager)? {
+                ControlAction::None => {}
+                ControlAction::ManualConnect => {
                     saved_peers.clear();
                     auto_deadline = None;
                 }
-            }
+                ControlAction::Shutdown => return Ok(()),
+            },
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
             Err(error) => return Err(error),
         }
@@ -268,6 +286,14 @@ pub fn send_request(request: &ControlRequest) -> io::Result<ServiceStatus> {
     serde_json::from_str(&response).map_err(io::Error::other)
 }
 
+pub fn control_endpoint_is_open() -> bool {
+    TcpStream::connect_timeout(
+        &CONTROL_ADDRESS.parse::<SocketAddr>().unwrap(),
+        Duration::from_millis(200),
+    )
+    .is_ok()
+}
+
 pub fn device_name() -> String {
     #[cfg(target_os = "windows")]
     let keys = ["USERNAME", "COMPUTERNAME"];
@@ -295,23 +321,33 @@ pub fn device_name() -> String {
     format!("ClipSync {}", std::env::consts::OS)
 }
 
-fn handle_control(mut stream: TcpStream, manager: &mut ServiceManager) -> io::Result<bool> {
+fn handle_control(
+    mut stream: TcpStream,
+    manager: &mut ServiceManager,
+) -> io::Result<ControlAction> {
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     let mut request = String::new();
-    BufReader::new(stream.try_clone()?).read_line(&mut request)?;
+    if BufReader::new(stream.try_clone()?).read_line(&mut request)? == 0 {
+        return Ok(ControlAction::None);
+    }
     let request: ControlRequest = serde_json::from_str(&request).map_err(io::Error::other)?;
-    let manual_connect = match request {
-        ControlRequest::Status => false,
+    let action = match request {
+        ControlRequest::Status => ControlAction::None,
         ControlRequest::Connect { ip } => {
             if manager.connect(ip).is_err() {
                 let _ = manager.start_listener();
             }
-            true
+            ControlAction::ManualConnect
+        }
+        ControlRequest::Shutdown => {
+            manager.stop();
+            *manager.status.lock().unwrap() = ServiceStatus::stopped();
+            ControlAction::Shutdown
         }
     };
     serde_json::to_writer(&mut stream, &manager.status()).map_err(io::Error::other)?;
     stream.write_all(b"\n")?;
-    Ok(manual_connect)
+    Ok(action)
 }
 
 fn start_next_saved_peer(
@@ -435,7 +471,9 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServiceStatus, device_name, parse_incoming_ip, parse_transport_peer};
+    use super::{
+        ControlRequest, ServiceStatus, device_name, parse_incoming_ip, parse_transport_peer,
+    };
 
     #[test]
     fn linux_or_windows_user_name_is_never_empty() {
@@ -459,5 +497,15 @@ mod tests {
         let peer = "192.0.2.10".parse().unwrap();
         assert!(ServiceStatus::connecting(peer, false).message.is_none());
         assert!(ServiceStatus::connecting(peer, true).message.is_some());
+    }
+
+    #[test]
+    fn stopped_status_and_shutdown_request_are_stable() {
+        let status = ServiceStatus::stopped();
+        assert_eq!(status.phase, "stopped");
+        assert_eq!(status.message.as_deref(), Some("进程已结束"));
+
+        let request = serde_json::to_string(&ControlRequest::Shutdown).unwrap();
+        assert_eq!(request, r#"{"command":"shutdown"}"#);
     }
 }

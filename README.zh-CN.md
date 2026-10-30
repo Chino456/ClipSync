@@ -143,8 +143,12 @@ Transport peer: Linux laptop [linux]
 ## Tauri 2 GUI
 
 GUI 已使用 Tauri 2 重构，不需要任何启动参数。窗口中央显示本机 IPv4，其下方
-是“开始连接”按钮和“开机自启”开关。连接时使用当前登录用户的名称：Windows
-读取 `USERNAME`，Linux 读取 `USER`/`LOGNAME`。
+是“开始连接”按钮、“开机自启”开关和“结束进程”按钮。连接时使用当前登录用户
+的名称：Windows 读取 `USERNAME`，Linux 读取 `USER`/`LOGNAME`。
+
+“结束进程”会关闭当前剪贴板传输进程和后台守护进程，确认控制端口已经关闭后显示
+“进程已结束”。GUI 本身保持打开，状态轮询不会自动重启服务；再次输入有效 IP 并
+点击连接时，GUI 会重新启动后台服务并发起连接。该按钮不会修改“开机自启”设置。
 
 构建 GUI：
 

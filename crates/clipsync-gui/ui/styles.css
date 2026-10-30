@@ -108,6 +108,50 @@ body {
   user-select: none;
 }
 
+#stop-processes-button {
+  min-width: 120px;
+  padding: 9px 18px;
+  border: 1px solid #d6dce7;
+  border-radius: 9px;
+  color: #667085;
+  background: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background 140ms ease;
+}
+
+#stop-processes-button:hover {
+  border-color: #e18b8b;
+  color: #b73737;
+  background: #fff8f8;
+}
+
+#stop-processes-button:focus-visible {
+  outline: 3px solid rgba(183, 55, 55, 0.18);
+  outline-offset: 3px;
+}
+
+#stop-processes-button.stopped {
+  border-color: #9bcdbb;
+  color: #137554;
+  background: #f3fbf8;
+}
+
+#stop-processes-button.failed {
+  border-color: #e18b8b;
+  color: #b73737;
+  background: #fff8f8;
+}
+
+#stop-processes-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .switch {
   position: relative;
   display: inline-flex;

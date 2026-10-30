@@ -7,6 +7,7 @@ const peerIp = document.querySelector("#peer-ip");
 const dialogError = document.querySelector("#dialog-error");
 const cancelButton = document.querySelector("#cancel-button");
 const autostartToggle = document.querySelector("#autostart-toggle");
+const stopProcessesButton = document.querySelector("#stop-processes-button");
 
 let submitting = false;
 
@@ -85,6 +86,9 @@ form.addEventListener("submit", async (event) => {
   dialogError.textContent = "";
   try {
     await invoke("connect_to_ip", { ip: peerIp.value.trim() });
+    stopProcessesButton.textContent = "结束进程";
+    stopProcessesButton.classList.remove("stopped", "failed");
+    stopProcessesButton.title = "";
     closeDialog();
     connectButton.textContent = `正在连接 ${peerIp.value.trim()}…`;
     await refreshConnectionStatus();
@@ -94,6 +98,27 @@ form.addEventListener("submit", async (event) => {
     peerIp.select();
   } finally {
     submitting = false;
+  }
+});
+
+stopProcessesButton.addEventListener("click", async () => {
+  stopProcessesButton.disabled = true;
+  stopProcessesButton.textContent = "正在结束…";
+  stopProcessesButton.classList.remove("stopped", "failed");
+  stopProcessesButton.title = "";
+  try {
+    const status = await invoke("stop_clipsync_processes");
+    if (status.phase !== "stopped") throw new Error("未能确认进程已结束");
+    stopProcessesButton.textContent = "进程已结束";
+    stopProcessesButton.classList.add("stopped");
+    connectButton.textContent = "开始连接";
+    connectButton.classList.remove("connected");
+  } catch (error) {
+    stopProcessesButton.textContent = "结束失败";
+    stopProcessesButton.classList.add("failed");
+    stopProcessesButton.title = String(error);
+  } finally {
+    stopProcessesButton.disabled = false;
   }
 });
 

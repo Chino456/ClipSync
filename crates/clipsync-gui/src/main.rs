@@ -5,6 +5,12 @@ mod daemon;
 use std::{
     io,
     net::{Ipv4Addr, SocketAddr, UdpSocket},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::Duration,
 };
 
 #[cfg(target_os = "windows")]
@@ -14,6 +20,9 @@ use std::{fs, path::PathBuf};
 
 use daemon::{ControlRequest, ServiceStatus};
 use serde::Serialize;
+
+static USER_STOPPED_SERVICE: AtomicBool = AtomicBool::new(false);
+static SERVICE_CONTROL_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +42,8 @@ fn device_info() -> Result<DeviceInfo, String> {
 #[tauri::command]
 fn connect_to_ip(ip: String) -> Result<ServiceStatus, String> {
     let peer = parse_peer_ip(&ip)?;
+    let _control = SERVICE_CONTROL_LOCK.lock().unwrap();
+    USER_STOPPED_SERVICE.store(false, Ordering::Release);
     daemon::ensure_running().map_err(|error| error.to_string())?;
     daemon::send_request(&ControlRequest::Connect { ip: peer })
         .map_err(|error| format!("无法连接后台服务：{error}"))
@@ -40,10 +51,37 @@ fn connect_to_ip(ip: String) -> Result<ServiceStatus, String> {
 
 #[tauri::command]
 fn connection_status() -> ServiceStatus {
+    let _control = SERVICE_CONTROL_LOCK.lock().unwrap();
+    if USER_STOPPED_SERVICE.load(Ordering::Acquire) {
+        return ServiceStatus::stopped();
+    }
     if daemon::ensure_running().is_err() {
         return ServiceStatus::listening();
     }
     daemon::send_request(&ControlRequest::Status).unwrap_or_else(|_| ServiceStatus::listening())
+}
+
+#[tauri::command]
+fn stop_clipsync_processes() -> Result<ServiceStatus, String> {
+    let _control = SERVICE_CONTROL_LOCK.lock().unwrap();
+    USER_STOPPED_SERVICE.store(true, Ordering::Release);
+
+    if daemon::send_request(&ControlRequest::Shutdown).is_err()
+        && daemon::control_endpoint_is_open()
+    {
+        USER_STOPPED_SERVICE.store(false, Ordering::Release);
+        return Err("无法通知 ClipSync 后台服务结束进程".to_owned());
+    }
+
+    for _ in 0..40 {
+        thread::sleep(Duration::from_millis(50));
+        if !daemon::control_endpoint_is_open() {
+            return Ok(ServiceStatus::stopped());
+        }
+    }
+
+    USER_STOPPED_SERVICE.store(false, Ordering::Release);
+    Err("ClipSync 进程未能在预期时间内结束".to_owned())
 }
 
 #[tauri::command]
@@ -191,6 +229,7 @@ fn main() {
             device_info,
             connect_to_ip,
             connection_status,
+            stop_clipsync_processes,
             autostart_enabled,
             set_autostart
         ])
