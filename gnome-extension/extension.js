@@ -7,6 +7,8 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 const DAEMON_BUS_NAME = 'org.clipsync.Daemon';
 const DAEMON_OBJECT_PATH = '/org/clipsync/Daemon';
 const MAX_TEXT_BYTES = 1024 * 1024;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 export default class ClipSyncExtension extends Extension {
     enable() {
@@ -42,6 +44,8 @@ export default class ClipSyncExtension extends Extension {
                 this._readTimeout = null;
                 this._clipboard.get_text(St.ClipboardType.CLIPBOARD,
                     (_clipboard, text) => this._sendText(text));
+                this._clipboard.get_content(St.ClipboardType.CLIPBOARD, 'image/png',
+                    (_clipboard, bytes) => this._sendImage(bytes));
                 return GLib.SOURCE_REMOVE;
             });
     }
@@ -58,6 +62,33 @@ export default class ClipSyncExtension extends Extension {
             null,
             Gio.DBusCallFlags.NO_AUTO_START,
             1000,
+            null,
+            (connection, result) => {
+                try {
+                    connection.call_finish(result);
+                } catch (error) {
+                    // ClipSync is not running or is shutting down.
+                }
+            });
+    }
+
+    _sendImage(bytes) {
+        if (!bytes)
+            return;
+        const data = bytes.get_data();
+        if (!data || data.length === 0 || data.length > MAX_IMAGE_BYTES)
+            return;
+        if (!PNG_SIGNATURE.every((value, index) => data[index] === value))
+            return;
+        Gio.DBus.session.call(
+            DAEMON_BUS_NAME,
+            DAEMON_OBJECT_PATH,
+            DAEMON_BUS_NAME,
+            'ClipboardImage',
+            new GLib.Variant('(ay)', [data]),
+            null,
+            Gio.DBusCallFlags.NO_AUTO_START,
+            3000,
             null,
             (connection, result) => {
                 try {

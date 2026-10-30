@@ -47,7 +47,8 @@ fn main() -> ExitCode {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     if env::args().nth(1).as_deref() == Some("__clipboard-frame") {
-        return clipboard::run_frame_helper();
+        let kind = env::args().nth(2).unwrap_or_default();
+        return clipboard::run_frame_helper(&kind);
     }
     if env::args().nth(1).as_deref() == Some("setup-gnome") {
         return gnome_extension::install();

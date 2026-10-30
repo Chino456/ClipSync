@@ -12,15 +12,17 @@ use std::{
     time::Duration,
 };
 
-use clipsync_core::{MAX_CLIPBOARD_TEXT_BYTES, SyncMessage};
+#[cfg(target_os = "linux")]
+use clipsync_core::MAX_CLIPBOARD_TEXT_BYTES;
+use clipsync_core::{MAX_CLIPBOARD_IMAGE_BYTES, SYNC_PROTOCOL_VERSION, SyncMessage};
 use uuid::Uuid;
 
-use crate::clipboard;
+use crate::clipboard::{self, ClipboardContent};
 #[cfg(target_os = "linux")]
 use crate::gnome_extension;
 
 const DEFAULT_SYNC_PORT: u16 = 24_872;
-const MAX_FRAME_BYTES: usize = MAX_CLIPBOARD_TEXT_BYTES + 4_096;
+const MAX_FRAME_BYTES: usize = MAX_CLIPBOARD_IMAGE_BYTES.div_ceil(3) * 4 + 8_192;
 const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(350);
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -54,7 +56,7 @@ pub fn run(args: impl IntoIterator<Item = String>) -> Result<(), Box<dyn std::er
         .name("clipsync-clipboard-write".to_owned())
         .spawn(move || clipboard_write_loop(incoming_receiver, remote_write))?;
 
-    println!("ClipSync text synchronization (protocol v1)");
+    println!("ClipSync clipboard synchronization (protocol v{SYNC_PROTOCOL_VERSION})");
     println!("Local device: {}", config.device_name);
     println!("Warning: phase-2 transport is not encrypted; use only on a trusted network.");
 
@@ -69,8 +71,8 @@ pub fn run(args: impl IntoIterator<Item = String>) -> Result<(), Box<dyn std::er
     }
 }
 
-fn clipboard_watch_loop(local_updates: SyncSender<String>) {
-    let mut last_observed = match clipboard::read_text() {
+fn clipboard_watch_loop(local_updates: SyncSender<ClipboardContent>) {
+    let mut last_observed = match clipboard::read_content() {
         Ok(text) => text,
         Err(error) => {
             eprintln!("Clipboard is unavailable: {error}");
@@ -79,10 +81,10 @@ fn clipboard_watch_loop(local_updates: SyncSender<String>) {
     };
 
     loop {
-        match clipboard::read_text() {
-            Ok(Some(text)) if last_observed.as_ref() != Some(&text) => {
-                last_observed = Some(text.clone());
-                match local_updates.try_send(text) {
+        match clipboard::read_content() {
+            Ok(Some(content)) if last_observed.as_ref() != Some(&content) => {
+                last_observed = Some(content.clone());
+                match local_updates.try_send(content) {
                     Ok(()) => {}
                     Err(mpsc::TrySendError::Full(_)) => {
                         eprintln!("! Clipboard event queue is busy; update dropped")
@@ -98,18 +100,23 @@ fn clipboard_watch_loop(local_updates: SyncSender<String>) {
 }
 
 fn clipboard_event_loop(
-    local_updates: Receiver<String>,
+    local_updates: Receiver<ClipboardContent>,
     outgoing: SyncSender<SyncMessage>,
-    remote_write: Arc<Mutex<Option<String>>>,
+    remote_write: Arc<Mutex<Option<ClipboardContent>>>,
 ) {
-    while let Ok(text) = local_updates.recv() {
+    while let Ok(content) = local_updates.recv() {
         let suppress = remote_write.lock().unwrap().take();
-        if suppress.as_ref() == Some(&text) {
+        if suppress.as_ref() == Some(&content) {
             continue;
         }
-        match SyncMessage::clipboard_text(text) {
+        let description = content.description();
+        let message = match content {
+            ClipboardContent::Text(text) => SyncMessage::clipboard_text(text),
+            ClipboardContent::ImagePng(png) => SyncMessage::clipboard_image_png(png),
+        };
+        match message {
             Ok(message) => match outgoing.try_send(message) {
-                Ok(()) => println!("-> Local clipboard changed"),
+                Ok(()) => println!("-> Local clipboard {description} changed"),
                 Err(mpsc::TrySendError::Full(_)) => {
                     eprintln!("! Connection is busy; clipboard change dropped")
                 }
@@ -122,7 +129,7 @@ fn clipboard_event_loop(
 
 #[cfg(target_os = "linux")]
 fn start_linux_clipboard_monitor(
-    local_updates: SyncSender<String>,
+    local_updates: SyncSender<ClipboardContent>,
 ) -> Result<Option<zbus::blocking::Connection>, Box<dyn std::error::Error>> {
     if is_gnome_wayland() {
         if !gnome_extension::is_enabled() {
@@ -142,7 +149,7 @@ fn start_linux_clipboard_monitor(
         thread::Builder::new()
             .name("clipsync-wayland-watch".to_owned())
             .spawn(move || {
-                if let Err(error) = clipboard::watch_wayland_text(local_updates) {
+                if let Err(error) = clipboard::watch_wayland_content(local_updates) {
                     eprintln!("Wayland clipboard monitor stopped: {error}");
                 }
             })?;
@@ -170,7 +177,7 @@ fn is_gnome_wayland() -> bool {
 
 #[cfg(target_os = "linux")]
 struct ClipboardBridge {
-    local_updates: SyncSender<String>,
+    local_updates: SyncSender<ClipboardContent>,
 }
 
 #[cfg(target_os = "linux")]
@@ -180,7 +187,23 @@ impl ClipboardBridge {
         if text.is_empty() || text.len() > MAX_CLIPBOARD_TEXT_BYTES {
             return;
         }
-        match self.local_updates.try_send(text) {
+        match self.local_updates.try_send(ClipboardContent::Text(text)) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(_)) => {
+                eprintln!("! GNOME clipboard event queue is busy; update dropped")
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {}
+        }
+    }
+
+    fn clipboard_image(&self, png: Vec<u8>) {
+        if png.is_empty()
+            || png.len() > MAX_CLIPBOARD_IMAGE_BYTES
+            || !png.starts_with(b"\x89PNG\r\n\x1a\n")
+        {
+            return;
+        }
+        match self.local_updates.try_send(ClipboardContent::ImagePng(png)) {
             Ok(()) => {}
             Err(mpsc::TrySendError::Full(_)) => {
                 eprintln!("! GNOME clipboard event queue is busy; update dropped")
@@ -190,11 +213,15 @@ impl ClipboardBridge {
     }
 }
 
-fn clipboard_write_loop(incoming: Receiver<String>, remote_write: Arc<Mutex<Option<String>>>) {
-    while let Ok(text) = incoming.recv() {
-        *remote_write.lock().unwrap() = Some(text.clone());
-        match clipboard::write_text(&text) {
-            Ok(()) => println!("<- Applied remote text to the clipboard"),
+fn clipboard_write_loop(
+    incoming: Receiver<ClipboardContent>,
+    remote_write: Arc<Mutex<Option<ClipboardContent>>>,
+) {
+    while let Ok(content) = incoming.recv() {
+        let description = content.description();
+        *remote_write.lock().unwrap() = Some(content.clone());
+        match clipboard::write_content(&content) {
+            Ok(()) => println!("<- Applied remote {description} to the clipboard"),
             Err(error) => {
                 remote_write.lock().unwrap().take();
                 eprintln!("Could not write remote clipboard: {error}");
@@ -207,7 +234,7 @@ fn client_loop(
     peer: SocketAddr,
     hello: &SyncMessage,
     outgoing: &Receiver<SyncMessage>,
-    incoming: &SyncSender<String>,
+    incoming: &SyncSender<ClipboardContent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         match TcpStream::connect_timeout(&peer, Duration::from_secs(3)) {
@@ -227,7 +254,7 @@ fn server_loop(
     listener: TcpListener,
     hello: &SyncMessage,
     outgoing: &Receiver<SyncMessage>,
-    incoming: &SyncSender<String>,
+    incoming: &SyncSender<ClipboardContent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let (stream, address) = listener.accept()?;
@@ -242,7 +269,7 @@ fn handle_connection(
     mut stream: TcpStream,
     hello: &SyncMessage,
     outgoing: &Receiver<SyncMessage>,
-    incoming: &SyncSender<String>,
+    incoming: &SyncSender<ClipboardContent>,
 ) -> io::Result<()> {
     stream.set_nodelay(true)?;
     write_frame(&mut stream, hello)?;
@@ -276,7 +303,10 @@ fn handle_connection(
     }
 }
 
-fn read_messages(stream: &mut TcpStream, incoming: &SyncSender<String>) -> io::Result<()> {
+fn read_messages(
+    stream: &mut TcpStream,
+    incoming: &SyncSender<ClipboardContent>,
+) -> io::Result<()> {
     let mut received_hello = false;
     loop {
         match read_frame(stream)? {
@@ -301,8 +331,23 @@ fn read_messages(stream: &mut TcpStream, incoming: &SyncSender<String>) -> io::R
                         "clipboard message received before hello",
                     ));
                 }
-                match incoming.try_send(text) {
-                    Ok(()) => println!("<= Received clipboard update from peer"),
+                match incoming.try_send(ClipboardContent::Text(text)) {
+                    Ok(()) => println!("<= Received clipboard text from peer"),
+                    Err(mpsc::TrySendError::Full(_)) => {
+                        eprintln!("! Incoming clipboard queue is busy; update dropped")
+                    }
+                    Err(mpsc::TrySendError::Disconnected(_)) => return Ok(()),
+                }
+            }
+            SyncMessage::ClipboardImage { png, .. } => {
+                if !received_hello {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "clipboard message received before hello",
+                    ));
+                }
+                match incoming.try_send(ClipboardContent::ImagePng(png)) {
+                    Ok(()) => println!("<= Received clipboard image from peer"),
                     Err(mpsc::TrySendError::Full(_)) => {
                         eprintln!("! Incoming clipboard queue is busy; update dropped")
                     }
@@ -398,6 +443,15 @@ mod tests {
     }
 
     #[test]
+    fn frame_round_trip_preserves_png_image() {
+        let original =
+            SyncMessage::clipboard_image_png(b"\x89PNG\r\n\x1a\nframe-test".to_vec()).unwrap();
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &original).unwrap();
+        assert_eq!(read_frame(&mut bytes.as_slice()).unwrap(), original);
+    }
+
+    #[test]
     fn rejects_oversized_frame_before_allocating() {
         let bytes = ((MAX_FRAME_BYTES + 1) as u32).to_be_bytes();
         let error = read_frame(&mut bytes.as_slice()).unwrap_err();
@@ -418,7 +472,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     #[ignore = "requires access to the desktop session D-Bus"]
-    fn gnome_dbus_bridge_delivers_clipboard_text() {
+    fn gnome_dbus_bridge_delivers_text_and_image() {
         let (sender, receiver) = mpsc::sync_channel(1);
         let service = format!("org.clipsync.Test{}", std::process::id());
         let _server = zbus::blocking::connection::Builder::session()
@@ -447,7 +501,13 @@ mod tests {
             .unwrap();
         assert_eq!(
             receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
-            "event-driven text"
+            ClipboardContent::Text("event-driven text".to_owned())
+        );
+        let png = b"\x89PNG\r\n\x1a\ngnome-test".to_vec();
+        let _: () = proxy.call("ClipboardImage", &(png.clone(),)).unwrap();
+        assert_eq!(
+            receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ClipboardContent::ImagePng(png)
         );
     }
 }

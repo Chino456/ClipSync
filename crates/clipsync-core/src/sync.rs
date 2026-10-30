@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-pub const SYNC_PROTOCOL_VERSION: u16 = 1;
+pub const SYNC_PROTOCOL_VERSION: u16 = 2;
 pub const MAX_CLIPBOARD_TEXT_BYTES: usize = 1024 * 1024;
+pub const MAX_CLIPBOARD_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 const MAX_DEVICE_NAME_BYTES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,6 +20,12 @@ pub enum SyncMessage {
         event_id: Uuid,
         text: String,
     },
+    ClipboardImage {
+        event_id: Uuid,
+        mime_type: String,
+        #[serde(with = "base64_bytes")]
+        png: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -33,6 +40,8 @@ pub enum SyncProtocolError {
     InvalidPlatform,
     #[error("clipboard text exceeds the 1 MiB limit")]
     ClipboardTooLarge,
+    #[error("clipboard image must be a PNG no larger than 10 MiB")]
+    ClipboardImageInvalid,
 }
 
 impl SyncMessage {
@@ -55,6 +64,16 @@ impl SyncMessage {
         let message = Self::ClipboardText {
             event_id: Uuid::new_v4(),
             text,
+        };
+        message.validate()?;
+        Ok(message)
+    }
+
+    pub fn clipboard_image_png(png: Vec<u8>) -> Result<Self, SyncProtocolError> {
+        let message = Self::ClipboardImage {
+            event_id: Uuid::new_v4(),
+            mime_type: "image/png".to_owned(),
+            png,
         };
         message.validate()?;
         Ok(message)
@@ -95,8 +114,37 @@ impl SyncMessage {
                     return Err(SyncProtocolError::ClipboardTooLarge);
                 }
             }
+            Self::ClipboardImage { mime_type, png, .. } => {
+                if mime_type != "image/png"
+                    || png.is_empty()
+                    || png.len() > MAX_CLIPBOARD_IMAGE_BYTES
+                    || !png.starts_with(b"\x89PNG\r\n\x1a\n")
+                {
+                    return Err(SyncProtocolError::ClipboardImageInvalid);
+                }
+            }
         }
         Ok(())
+    }
+}
+
+mod base64_bytes {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use serde::{Deserialize, Deserializer, Serializer, de::Error as _};
+
+    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        STANDARD.decode(encoded).map_err(D::Error::custom)
     }
 }
 
@@ -128,6 +176,30 @@ mod tests {
         assert_eq!(
             SyncMessage::clipboard_text(text),
             Err(SyncProtocolError::ClipboardTooLarge)
+        );
+    }
+
+    #[test]
+    fn png_clipboard_round_trip() {
+        let png = b"\x89PNG\r\n\x1a\nexample".to_vec();
+        let original = SyncMessage::clipboard_image_png(png).unwrap();
+        assert_eq!(
+            SyncMessage::decode(&original.encode().unwrap()).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn rejects_non_png_and_oversized_images() {
+        assert_eq!(
+            SyncMessage::clipboard_image_png(b"not a png".to_vec()),
+            Err(SyncProtocolError::ClipboardImageInvalid)
+        );
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.resize(MAX_CLIPBOARD_IMAGE_BYTES + 1, 0);
+        assert_eq!(
+            SyncMessage::clipboard_image_png(png),
+            Err(SyncProtocolError::ClipboardImageInvalid)
         );
     }
 }

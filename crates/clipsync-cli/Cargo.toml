@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 clipsync-core = { path = "../clipsync-core" }
+png.workspace = true
 socket2.workspace = true
 uuid.workspace = true
 

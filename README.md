@@ -7,7 +7,7 @@ between Windows and Linux machines on the same LAN.
 
 ## Phase 1: LAN discovery
 
-The CLI supports both peer discovery and text clipboard synchronization.
+The CLI supports peer discovery plus text and PNG clipboard synchronization.
 Discovery by itself does not imply trust.
 
 Build and run it on two machines connected to the same LAN:
@@ -65,10 +65,11 @@ blocks all traffic between wireless clients. A quick reachability check is
 `ping <peer-ip>`; however, some networks block ICMP while still allowing the UDP
 application port, so the ClipSync probe is the final test.
 
-## Phase 2: text clipboard synchronization (MVP)
+## Phase 2: text and image clipboard synchronization
 
-The MVP synchronizes UTF-8 plain text up to 1 MiB over one bidirectional TCP
-connection. It does not upload clipboard content that existed before startup.
+Protocol v2 synchronizes UTF-8 text up to 1 MiB and PNG images up to 10 MiB over
+one bidirectional TCP connection. It does not upload clipboard content that
+existed before startup. Both devices must run ClipSync 0.2.0 or newer.
 
 On the receiving/listening device:
 
@@ -82,9 +83,9 @@ On the device that initiates the connection:
 cargo run --release -- sync "Windows desktop" --peer 192.0.2.41
 ```
 
-Both directions are active after the connection is established. Copy text on
-either device, then paste normally with `Ctrl+V` on the other device. TCP port
-`24872` must be allowed by the listening device's firewall.
+Both directions are active after the connection is established. Copy text or
+an image on either device, then paste normally with `Ctrl+V` on the other
+device. TCP port `24872` must be allowed by the listening device's firewall.
 
 ### Tauri 2 GUI
 
@@ -141,9 +142,10 @@ gnome-extensions enable clipsync@local
 ```
 
 The extension observes clipboard ownership inside GNOME Shell and forwards text
-to the local ClipSync process over the session D-Bus. It never accesses the
-network. Other compatible Wayland compositors use one persistent
-`wl-paste --watch` process; X11 retains the `xclip`/`xsel` fallback.
+and PNG data to the local ClipSync process over the session D-Bus. It never
+accesses the network. Upgrade users must rerun `clipsync setup-gnome` and log
+out once to install extension v2. Other compatible Wayland compositors use
+persistent `wl-paste --watch` processes; X11 requires `xclip` for images.
 
 > **Security notice:** this milestone deliberately keeps pairing and encrypted
 > transport separate. Clipboard traffic is currently unencrypted. Use it only
@@ -154,15 +156,15 @@ network. Other compatible Wayland compositors use one persistent
 
 1. **LAN discovery (done):** multicast and direct-IP probes, peer presence,
    protocol validation, self-filtering, and expiry.
-2. **Text clipboard MVP (current):** bidirectional TCP text synchronization,
-   native Windows clipboard, Linux Wayland/X11 adapters, limits, and loop
-   suppression.
+2. **Clipboard synchronization (done):** bidirectional TCP text and PNG image
+   synchronization, native Windows clipboard formats, Linux Wayland/X11
+   adapters, limits, and loop suppression.
 3. **Pairing and trust:** persistent device identity, explicit two-device
    confirmation, key exchange, and an encrypted authenticated channel.
 4. **Native event adapters:** Win32 event listener and compositor-specific Linux
    event integrations to replace the MVP polling adapter.
-5. **Rich content and product shell:** images/files, tray UI, device management,
-   packaging, and diagnostics. Persistent background service and autostart are
+5. **Product shell:** files, tray UI, device management, packaging, and
+   diagnostics. PNG images, persistent background service, and autostart are
    implemented.
 
 ## Development

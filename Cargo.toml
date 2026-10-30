@@ -3,12 +3,14 @@ members = ["crates/clipsync-core", "crates/clipsync-cli", "crates/clipsync-gui"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.85"
 
 [workspace.dependencies]
+base64 = "0.22.1"
+png = "0.17.16"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 socket2 = { version = "0.6.5", features = ["all"] }
